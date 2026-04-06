@@ -1,0 +1,24 @@
+[package]
+name = "screen_objects"
+version = "0.1.0"
+edition = "2024"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "screen_objects"
+crate-type = ["cdylib", "rlib"]
+
+[profile.release]
+codegen-units = 1   
+lto = true
+opt-level = 3
+
+
+[dependencies]
+image = "0.25.9"
+itertools = "0.14.0"
+once_cell = "1.21.3"
+parking_lot = "0.12.5"
+pyo3 = "0.28.2"
+serde = {version = "1.0.228", features = ["derive"]}
+serde_json = "1.0.149"
