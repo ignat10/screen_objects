@@ -76,16 +76,19 @@ impl ScreenObject {
     fn compare(&mut self, steps: Option<u16>) -> bool {
         let point = self.point.as_ref().unwrap();
         let sample = self.sample.as_mut().expect("object does not have a sample");
-
+    
+        let screen_img = screen::get();
         let coords = if let Some(steps) = steps {
-            &point.move_coords(steps)
+            point.move_coords(steps)
         } else {
-            &point.coords
+            point.coords
         };
+        let tolerance = sample.tolerance;
 
-        let size = sample.iter_images().next().unwrap().dimensions();
-        let screen = screen::get_crop(coords.x as u32, coords.y as u32, size.0, size.1);
-        sample.compare_loop(&screen)
+        sample.iter_images()
+            .any(|img| {
+                image_analyzer::images_match(&*screen_img, img, coords, tolerance)
+            })
     }
 
     fn tap_if_found(&mut self) -> bool {
@@ -198,10 +201,16 @@ impl Point {
 }
 
 
-#[derive(Deserialize)]
-struct Coords {
+#[derive(Deserialize, Copy, Clone)]
+pub(crate) struct Coords {
     x: u16,
     y: u16,
+}
+
+impl Coords {
+    fn to_tuple(&self) -> (u32, u32) {
+        (self.x as u32, self.y as u32)
+    }
 }
 
 
