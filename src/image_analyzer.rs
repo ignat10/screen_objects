@@ -1,31 +1,35 @@
-use core::simd::*;
-use core::simd::num::*;
-
-
-use image;
-
 use crate::Coords;
 
-
-const CHUNK_SIZE: usize = 32;
-
-const THRESHOLD: f32 = 2.0;
+use image::RgbImage;
 
 
+const RGB_CHANNELS: usize = 3;
 
-pub(super) fn images_match(image1: &image::GrayImage, image2: &image::GrayImage, tolerance: f32) -> bool {
-    assert!(image1.dimensions() == image2.dimensions(),
-        "Images must have the same dimensions for comparison"
-    );
 
-    let total_diff: u32 = image1.as_raw().iter()
-        .zip(image2.as_raw().iter())
-        .map(|(&a, &b)| (a as i16 - b as i16).abs() as u32)
+pub(super) fn images_match(
+    screen: &RgbImage,
+    sample: &RgbImage,
+    coords: Coords,
+    tolerance: f32,
+) -> bool {
+    let (w, h) = sample.dimensions();
+
+    let start_row = coords.x as usize * RGB_CHANNELS;
+    let end_row = start_row + w as usize * RGB_CHANNELS;
+    let crop = screen
+        .chunks_exact(screen.width() as usize * RGB_CHANNELS)
+        .skip(coords.y as usize)
+        .take(h as usize)
+        .flat_map(|row| {
+            &row[start_row..end_row]
+        });
+
+    let total_diff: u32 = sample.iter()
+        .zip(crop)
+        .map(|(&a, &b)| a.abs_diff(b) as u32)
         .sum();
-    
-    total_diff < ((image1.width() * image1.height() * u8::MAX as u32) as f32 * tolerance) as u32
+    tolerance < total_diff as f32 / ((sample.len() * u8::MAX as usize) as f32)
 }
-
 
 
 pub(super) fn find_sample(
