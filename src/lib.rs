@@ -96,7 +96,10 @@ impl ScreenObject {
         let screen = &*screen::get();
         let tolerance = sample.tolerance;
 
-        let coords = sample.iter_images().find_map(|sample_image| image_analyzer::find_sample(screen, sample_image, tolerance));
+        let coords = sample.iter_images()
+            .find_map(|sample_image|
+            image_analyzer::find_sample(screen, sample_image, tolerance)
+        );
 
         if let Some(coords) = coords {
             adb::tap(&coords);
@@ -126,7 +129,7 @@ struct Sample {
     tolerance: f32,
     path: PathBuf,
     #[serde(skip, default)]
-    _images: HashMap<OsString, Option<image::GrayImage>>,
+    _images: HashMap<OsString, Option<image::RgbImage>>,
 }
 
 
@@ -140,26 +143,23 @@ impl Sample {
         }
     }
 
-    fn iter_images(&mut self) -> impl Iterator<Item = &image::GrayImage> {
+    fn iter_images(&mut self) -> impl Iterator<Item = &image::RgbImage> {
         if self._images.is_empty() {
             self.init();
         }
 
         let path = paths::samples().join(self.path.clone());
 
-        self._images.iter_mut().filter_map(move |(key, image)| {
-            if image.is_none() {
-                *image = Some(image::open(path.join(key)).unwrap().to_luma8());
+        self._images.iter_mut().filter_map(move |(key, img)| {
+            if img.is_none() {
+                *img = Some(
+                    image::open(path.join(key))
+                    .expect("Failed to open sample image")
+                    .to_rgb8()
+                );
             }
 
-            image.as_ref()
-        })
-    }
-
-    fn compare_loop(&mut self, comparison: &image::GrayImage) -> bool {
-        let tolerance = self.tolerance;
-        self.iter_images().any(|sample_image| {
-            image_analyzer::images_match(sample_image, comparison, tolerance)
+            img.as_ref()
         })
     }
 }

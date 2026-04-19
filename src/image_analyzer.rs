@@ -33,8 +33,8 @@ pub(super) fn images_match(
 
 
 pub(super) fn find_sample(
-    screen: &image::GrayImage,
-    sample: &image::GrayImage,
+    screen: &RgbImage,
+    sample: &RgbImage,
     tolerance: f32,
 ) -> Option<Coords> {
     let sx = screen.width() as usize;
