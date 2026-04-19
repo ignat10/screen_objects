@@ -1,4 +1,6 @@
-use parking_lot::{Mutex, MutexGuard, MappedMutexGuard};
+use std::sync::{MappedMutexGuard, Mutex, MutexGuard};
+
+
 
 use image;
 

@@ -1,4 +1,4 @@
-#![feature(portable_simd)]
+#![feature(mapped_lock_guards)]
 
 use std::collections::HashMap;
 use std::ffi::OsString;
