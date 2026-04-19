@@ -7,30 +7,26 @@ use image;
 use crate::adb;
 
 
-static SCREEN: Mutex<Option<image::GrayImage>> =  Mutex::new(None);
+static SCREEN: Mutex<Option<image::RgbImage>> =  Mutex::new(None);
 
 
 
-pub(super) fn get() -> MappedMutexGuard<'static, image::GrayImage> {
-    let mut screen_guard = SCREEN.lock();
+pub(super) fn get() -> MappedMutexGuard<'static, image::RgbImage> {
+    let guard = SCREEN.lock().unwrap();
     
-    if screen_guard.as_ref().is_none() {
-        set(&mut screen_guard);
+    if guard.as_ref().is_none() {
+        drop(guard);
+        set();
     }
-    
-    MutexGuard::map(screen_guard, |opt| opt.as_mut().unwrap())
-}
 
-
-pub(super) fn get_crop(x: u32, y: u32, width: u32, height: u32) -> image::GrayImage {
-    let screen_guard = get();
+    let guard = SCREEN.lock().unwrap();
     
-    image::imageops::crop_imm(&*screen_guard, x, y, width, height).to_image()
+    MutexGuard::map(guard, |opt| opt.as_mut().unwrap())
 }
 
 
 pub(super) fn reset() {
-    *SCREEN.lock() = None;
+    *SCREEN.lock().unwrap() = None;
 }
 
 
