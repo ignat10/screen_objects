@@ -3,7 +3,6 @@ use std::io::stdin;
 use std::fs;
 use std::sync::OnceLock;
 
-use itertools::Itertools;
 
 use crate::{paths, Coords};
 
@@ -55,10 +54,11 @@ pub(crate) fn dimensions() -> (u32, u32) {
         .last()
         .unwrap();
 
-    size_part.split('x')
+    let size = size_part.split('x')
         .map(|s| s.parse::<u32>().unwrap())
-        .collect_tuple()
-        .unwrap()
+        .collect::<Vec<u32>>();
+
+    (size[0], size[1])
 }
 
 
