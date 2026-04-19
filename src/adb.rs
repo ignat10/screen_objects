@@ -41,7 +41,9 @@ pub(super) fn tap(coords: &Coords) {
 
 
 pub(crate) fn screencap() -> Vec<u8> {
-    device_action(&["exec-out", "screencap",]).stdout
+    let mut v = device_action(&["exec-out", "screencap"]).stdout;
+    v.drain(..16);
+    v
 }
 
 

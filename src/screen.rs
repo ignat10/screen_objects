@@ -34,13 +34,19 @@ pub(super) fn reset() {
 }
 
 
-fn set(screen_guard: &mut MutexGuard<'static, Option<image::GrayImage>>) {
-    let screen_bytes = adb::screencap();
+fn set() {
+    let mut guard = SCREEN.lock().unwrap();
+
     let (w, h) = adb::dimensions();
+    let output_bytes = adb::screencap();
 
-    let rgba_img = image::RgbaImage::from_raw(w, h, screen_bytes)
-        .expect("Failed to create RGBA image from screencap data");
+    let rgba_img = image::RgbaImage::from_raw(
+        w,
+        h,
+        output_bytes,
+    ).expect("Failed to create RGB array from screencap bytes");
 
-    let gray_img = image::DynamicImage::ImageRgba8(rgba_img).into_luma8();
-    **screen_guard = Some(gray_img);
+    let rgb_img = image::DynamicImage::from(rgba_img).to_rgb8();
+
+    *guard = Some(rgb_img);
 }
