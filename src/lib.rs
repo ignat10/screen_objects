@@ -56,7 +56,7 @@ struct ScreenObject {
 #[pymethods]
 impl ScreenObject {
     #[pyo3(signature = (delay=None, steps=None, repeat=None))]
-    fn tap(&self, delay: Option<f32>, steps: Option<u16>, repeat: Option<u8>) {
+    fn tap(&mut self, delay: Option<f32>, steps: Option<u16>, repeat: Option<u8>) {
         let coords = if let Some(steps) = steps {
             let delta = self.delta.as_ref().unwrap();
             self.coords.unwrap().with_delta(delta, steps)
@@ -101,7 +101,16 @@ impl ScreenObject {
         );
 
         if let Some(coords) = coords {
-            adb::tap(coords);
+            let size = self.iter_images()
+                .next()
+                .unwrap()
+                .dimensions();
+            let center = Coords {
+                x: coords.x + size.0 as u16 / 2,
+                y: coords.y + size.1 as u16 / 2
+            };
+
+            adb::tap(center);
             screen::reset();
             return true;
         } else {
@@ -158,6 +167,7 @@ pub(crate) struct Coords {
     x: u16,
     y: u16,
 }
+
 
 impl Coords {
     fn with_delta(&self, delta: &Delta, steps: u16) -> Coords {
