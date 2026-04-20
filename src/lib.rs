@@ -211,114 +211,30 @@ mod tests {
     fn screen_object_deserialization() {
         let data = r#"
             {
-                "point": {
-                    "coords": {
-                        "x": 100,
-                        "y": 200
-                    },
-                    "delta": {
-                        "PosX": 10
-                    }
+                "coords": {
+                    "x": 100,
+                    "y": 200
                 },
-                "sample": {
-                    "path": "sample_path",
-                    "tolerance": 0.8
-                }
+                "delta": {
+                    "PosX": 10
+                },
+                "path": "sample_path"
             }
         "#;
 
-        let result: Result<ScreenObject, serde_json::Error> = serde_json::from_str(&data);
+        let result = serde_json::from_str::<ScreenObject>(&data);
 
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "{}", result.err().unwrap());
 
         let screen_object = result.unwrap();
 
-        let point = screen_object.point.unwrap();
-        let sample = screen_object.sample.unwrap();
+        let coords = screen_object.coords.unwrap();
+        let delta = screen_object.delta.unwrap();
+        let path = screen_object.path.unwrap();
 
-        assert_eq!(point.coords.x, 100);
-        assert_eq!(point.coords.y, 200);
-        assert_eq!(point.delta.unwrap(), Delta::PosX(10));
-
-        assert_eq!(sample.path, PathBuf::from("sample_path"));
-        assert_eq!(sample.tolerance, 0.8);
-    }
-
-
-    #[test]
-    fn sample_test() {
-        let data = r#"
-            {
-                "path": "path_to_sample_dir",
-                "tolerance": 0.8
-            }
-        "#;
-
-        let sample_result: Result<Sample, serde_json::Error> = serde_json::from_str(&data);
-
-        assert!(sample_result.is_ok());
-
-        let sample = sample_result.unwrap();
-
-        assert_eq!(sample.path, PathBuf::from("path_to_sample_dir"));
-        assert_eq!(sample.tolerance, 0.8);
-    }
-
-    #[test]
-    fn full_point_test() {
-        let data = r#"
-            {
-                "coords": {
-                    "x": 200,
-                    "y": 900
-                },
-                "delta": {
-                    "PosY": 50
-                }
-            }
-        "#;
-
-
-        let point_result: Result<Point, serde_json::Error> = serde_json::from_str(&data);
-
-        assert!(point_result.is_ok());
-
-        let point = point_result.unwrap();
-        let coords = &point.coords;
-        let delta = point.delta.as_ref().unwrap();
-
-        assert_eq!(coords.x, 200);
-        assert_eq!(coords.y, 900);
-
-        assert_eq!(delta, &Delta::PosY(50));
-
-        let moved_coords = point.move_coords(3);
-
-        assert_eq!(moved_coords.x, 200);
-        assert_eq!(moved_coords.y, 1050);
-
-    }
-
-    #[test]
-    fn point_without_delta() {
-    let data_without_delta = r#"
-        {
-            "coords": {
-                "x": 1200,
-                "y": 400
-            }
-        }
-    "#;
-
-        let point_result: Result<Point, serde_json::Error> = serde_json::from_str(&data_without_delta);
-
-        assert!(point_result.is_ok());
-
-        let point = point_result.unwrap();
-
-        assert_eq!(point.coords.x, 1200);
-        assert_eq!(point.coords.y, 400);
-
-        assert!(point.delta.is_none());
+        assert_eq!(coords.x, 100);
+        assert_eq!(coords.y, 200);
+        assert_eq!(delta, Delta::PosX(10));
+        assert_eq!(path, PathBuf::from("sample_path"));
     }
 }
