@@ -45,8 +45,11 @@ fn get_objects(data_path: PathBuf) -> HashMap<String, ScreenObject> {
 #[pyclass]
 #[derive(Deserialize)]
 struct ScreenObject {
-    point: Option<Point>,
-    sample: Option<Sample>
+    coords: Option<Coords>,
+    delta: Option<Delta>,
+    path: Option<PathBuf>,
+    #[serde(skip)]
+    _images: HashMap<OsString, Option<image::RgbImage>>
 }
 
 
@@ -54,11 +57,11 @@ struct ScreenObject {
 impl ScreenObject {
     #[pyo3(signature = (delay=None, steps=None, repeat=None))]
     fn tap(&self, delay: Option<f32>, steps: Option<u16>, repeat: Option<u8>) {
-        let point = self.point.as_ref().unwrap();
         let coords = if let Some(steps) = steps {
-            &point.move_coords(steps)
+            let delta = self.delta.as_ref().unwrap();
+            self.coords.unwrap().with_delta(delta, steps)
         } else {
-            &point.coords
+            self.coords.unwrap()
         };
 
         if let Some(secs) = delay {
@@ -74,35 +77,31 @@ impl ScreenObject {
 
     #[pyo3(signature = (steps=None))]
     fn compare(&mut self, steps: Option<u16>) -> bool {
-        let point = self.point.as_ref().unwrap();
-        let sample = self.sample.as_mut().expect("object does not have a sample");
     
         let screen_img = screen::get();
         let coords = if let Some(steps) = steps {
-            point.move_coords(steps)
+            let delta = self.delta.as_ref().unwrap();
+            self.coords.unwrap().with_delta(delta, steps)
         } else {
-            point.coords
+            self.coords.unwrap()
         };
-        let tolerance = sample.tolerance;
 
-        sample.iter_images()
+        self.iter_images()
             .any(|img| {
-                image_analyzer::images_match(&*screen_img, img, coords, tolerance)
+                image_analyzer::images_match(&*screen_img, img, coords)
             })
     }
 
     fn tap_if_found(&mut self) -> bool {
-        let sample = self.sample.as_mut().unwrap();
         let screen = &*screen::get();
-        let tolerance = sample.tolerance;
 
-        let coords = sample.iter_images()
+        let coords = self.iter_images()
             .find_map(|sample_image|
-            image_analyzer::find_sample(screen, sample_image, tolerance)
+            image_analyzer::find_sample(screen, sample_image)
         );
 
         if let Some(coords) = coords {
-            adb::tap(&coords);
+            adb::tap(coords);
             screen::reset();
             return true;
         } else {
@@ -111,31 +110,20 @@ impl ScreenObject {
     }
 
     fn find_object(&mut self) -> Option<(u16, u16)> {
-        let tolerance = self.sample.as_ref().unwrap().tolerance;
         let screen = &*screen::get();
-        let coords = self.sample
-            .as_mut()
-            .unwrap()
+        let coords = self
             .iter_images()
-            .find_map(|img| image_analyzer::find_sample(screen, img, tolerance))?;
+            .find_map(|img| image_analyzer::find_sample(screen, img))?;
         
         Some((coords.x, coords.y))
     }
 }
 
 
-#[derive(Deserialize)]
-struct Sample {
-    tolerance: f32,
-    path: PathBuf,
-    #[serde(skip, default)]
-    _images: HashMap<OsString, Option<image::RgbImage>>,
-}
-
-
-impl Sample {
+impl ScreenObject {
     fn init(&mut self) {
-        let samples_dir = paths::samples().join(&self.path);
+        let path = self.path.as_ref().unwrap();
+        let samples_dir = paths::samples().join(path);
         
         for entry in fs::read_dir(samples_dir).unwrap() {
             let entry = entry.unwrap();
@@ -148,7 +136,7 @@ impl Sample {
             self.init();
         }
 
-        let path = paths::samples().join(self.path.clone());
+        let path = paths::samples().join(self.path.as_ref().unwrap());
 
         self._images.iter_mut().filter_map(move |(key, img)| {
             if img.is_none() {
@@ -171,13 +159,10 @@ pub(crate) struct Coords {
     y: u16,
 }
 
-
-impl Point {
-    fn move_coords(&self, steps: u16) -> Coords {
-        let delta = self.delta.as_ref().unwrap();
-
-        let x = self.coords.x;
-        let y = self.coords.y;
+impl Coords {
+    fn with_delta(&self, delta: &Delta, steps: u16) -> Coords {
+        let x = self.x;
+        let y = self.y;
 
         match delta {
             Delta::PosX(interval) => Coords {
@@ -197,19 +182,6 @@ impl Point {
                 y: y - interval * steps
             }
         }
-    }
-}
-
-
-#[derive(Deserialize, Copy, Clone)]
-pub(crate) struct Coords {
-    x: u16,
-    y: u16,
-}
-
-impl Coords {
-    fn to_tuple(&self) -> (u32, u32) {
-        (self.x as u32, self.y as u32)
     }
 }
 
