@@ -35,7 +35,7 @@ pub(super) fn device_config() {
 }
 
 
-pub(super) fn tap(coords: &Coords) {
+pub(super) fn tap(coords: Coords) {
     device_action(&["shell", "input", "tap", &coords.x.to_string(), &coords.y.to_string()]);
 }
 

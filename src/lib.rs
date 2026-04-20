@@ -165,10 +165,10 @@ impl Sample {
 }
 
 
-#[derive(Deserialize)]
-struct Point {
-    coords: Coords,
-    delta: Option<Delta>
+#[derive(Deserialize, Copy, Clone)]
+pub(crate) struct Coords {
+    x: u16,
+    y: u16,
 }
 
 
