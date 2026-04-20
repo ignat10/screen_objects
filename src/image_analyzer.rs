@@ -6,11 +6,13 @@ use image::RgbImage;
 const RGB_CHANNELS: usize = 3;
 
 
+const TOLERANCE: f32 = 0.1;
+
+
 pub(super) fn images_match(
     screen: &RgbImage,
     sample: &RgbImage,
     coords: Coords,
-    tolerance: f32,
 ) -> bool {
     let (w, h) = sample.dimensions();
 
@@ -28,59 +30,60 @@ pub(super) fn images_match(
         .zip(crop)
         .map(|(&a, &b)| a.abs_diff(b) as u32)
         .sum();
-    tolerance < total_diff as f32 / ((sample.len() * u8::MAX as usize) as f32)
+    TOLERANCE > total_diff as f32 / ((sample.len() * u8::MAX as usize) as f32)
 }
 
 
 pub(super) fn find_sample(
     screen: &RgbImage,
     sample: &RgbImage,
-    tolerance: f32,
 ) -> Option<Coords> {
-    let sx = screen.width() as usize;
-    let sy = screen.height() as usize;
+    let screen_w = screen.width() as usize;
+    let sample_w = sample.width() as usize;
 
-    let ix= sample.width() as usize;
-    let iy = sample.height() as usize;
+    let screen_h = screen.height() as usize;
+    let sample_h = sample.height() as usize;
 
     let raw_screen = screen.as_raw();
     let raw_sample = sample.as_raw();
 
-    for y in 0..(sy - iy) {
-        for x in 0..(sx - ix) {
+    let step = sample.len().isqrt().isqrt(); // too big step
+
+    let mut min_diff = u32::MAX;
+    let (mut best_x, mut best_y) = (0, 0);
+    for y in 0..=screen_h - sample_h {
+        for x in 0..=screen_w - sample_w {
+
             let mut diff_sum: u32 = 0;
-            let mut counter: usize = 0;
-            for row in 0..iy {
-                let start_screen = (y + row) * sx + x;
-                let start_sample = row * ix;
-                for (chunk_a, chunk_b) in
-                    raw_sample[start_sample..start_sample + ix].chunks_exact(CHUNK_SIZE)
-                    .zip(raw_screen[start_screen..start_screen + ix].chunks_exact(CHUNK_SIZE))
-                {
-                    let a = u8x32::from_slice(chunk_a);
-                    let b = u8x32::from_slice(chunk_b);
-
-                    diff_sum += (a.cast::<i16>() - b.cast::<i16>()).abs().reduce_sum() as u32;
-                    counter += CHUNK_SIZE;
+            for sy in (0..sample_h).step_by(step) {
+                let screen_start = (y + sy) * screen_w + x;
+                let sample_start = sy * sample_w;
+                for sx in (0..sample_w).step_by(step) {
+                    for c in 0..3 {
+                        diff_sum += raw_screen[(screen_start + sx) * RGB_CHANNELS + c]
+                            .abs_diff(raw_sample[(sample_start + sx) * RGB_CHANNELS + c]) as u32;
+                    }
                 }
-
-                let result = (diff_sum as f32 / (counter * u8::MAX as usize) as f32).sqrt();
-
-                if result <= tolerance {
-                                    dbg!(result);
-                    return Some(Coords {
-                        x: x as u16,
-                        y: y as u16
-                    });
-                }
-
-
-                if result > tolerance * THRESHOLD {
-                    break;
-                }
-                println!("second loop");
+            }
+            if diff_sum < min_diff {
+                println!("new best point: ({} {})", x, y);
+                min_diff = diff_sum;
+                (best_x, best_y) = (x, y);
             }
         }
     }
-    None
+    let checked_bytes = (sample_w / step) * (sample_h / step) * RGB_CHANNELS;
+    dbg!(checked_bytes);
+    dbg!(step);
+    dbg!(min_diff as usize / checked_bytes);
+    dbg!(min_diff as f32 / (checked_bytes * u8::MAX as usize) as f32);
+    
+    return if TOLERANCE > min_diff as f32 / (checked_bytes * u8::MAX as usize) as f32 {
+         Some(Coords {
+            x: best_x as u16,
+            y: best_y as u16
+        })
+    } else {
+        None
+    }
 }
