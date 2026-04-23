@@ -1,10 +1,9 @@
 use std::process::{Command, Output};
 use std::io::stdin;
-use std::fs;
 use std::sync::OnceLock;
 
 
-use crate::{paths, Coords};
+use crate::Coords;
 
 
 const ADB_PORT_LENGTH: usize = 5;
@@ -14,10 +13,9 @@ static DEVICE_SERIAL: OnceLock<String> = OnceLock::new();
 
 
 
-pub(super) fn device_config() {
+pub(super) fn device_config(ip: String) {
     println!("connecting adb device...");
 
-    let ip = get_ip();
     let mut serial: Option<String> = scan();
 
 
@@ -30,6 +28,7 @@ pub(super) fn device_config() {
 
         serial = scan();
     }
+
     DEVICE_SERIAL.set(serial.unwrap()).unwrap();
     println!("device connected");
 }
@@ -126,11 +125,4 @@ fn run(args: &[&str]) -> std::process::Output {
         .args(args)
         .output()
         .expect("Failed to execute adb command")
-}
-
-
-fn get_ip() -> String {
-    let ip_path = paths::ip();
-    let raw_ip = fs::read_to_string(ip_path).expect("Failed to read device IP file");
-    raw_ip.trim().to_string()
 }

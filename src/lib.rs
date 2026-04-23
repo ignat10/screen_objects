@@ -1,9 +1,11 @@
 #![feature(mapped_lock_guards)]
 
+
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::thread::sleep;
 use std::time::Duration;
 
@@ -11,7 +13,6 @@ use pyo3::prelude::*;
 use serde::Deserialize;
 use serde_json;
 
-pub mod paths;
 pub mod adb;
 mod screen;
 mod image_analyzer;
@@ -28,14 +29,21 @@ mod screen_objects {
 }
 
 
-#[pyfunction]
-fn get_objects(data_path: PathBuf) -> HashMap<String, ScreenObject> {
-    paths::init(PathBuf::from(data_path));
+static SAMPLES: OnceLock<PathBuf> = OnceLock::new();
 
-    adb::device_config();
+fn samples() -> &'static PathBuf {
+    SAMPLES.get().unwrap()
+}
+
+
+#[pyfunction]
+fn get_objects(samples_dir: PathBuf, objects: PathBuf, ip: String) -> HashMap<String, ScreenObject> {
+    SAMPLES.set(samples_dir).unwrap();
+
+    adb::device_config(ip);
 
     serde_json::from_reader(
-        fs::File::open(paths::game_objects())
+        fs::File::open(objects)
         .expect("Failed open file")
     )
     .expect("Failed to parse JSON data")
@@ -56,7 +64,7 @@ struct ScreenObject {
 #[pymethods]
 impl ScreenObject {
     #[pyo3(signature = (delay=None, steps=None, repeat=None))]
-    fn tap(&mut self, delay: Option<f32>, steps: Option<u16>, repeat: Option<u8>) {
+    fn tap(&self, delay: Option<f32>, steps: Option<u16>, repeat: Option<u8>) {
         let coords = if let Some(steps) = steps {
             let delta = self.delta.as_ref().unwrap();
             self.coords.unwrap().with_delta(delta, steps)
@@ -132,7 +140,7 @@ impl ScreenObject {
 impl ScreenObject {
     fn init(&mut self) {
         let path = self.path.as_ref().unwrap();
-        let samples_dir = paths::samples().join(path);
+        let samples_dir = samples().join(path);
         
         for entry in fs::read_dir(samples_dir).unwrap() {
             let entry = entry.unwrap();
@@ -145,7 +153,7 @@ impl ScreenObject {
             self.init();
         }
 
-        let path = paths::samples().join(self.path.as_ref().unwrap());
+        let path = samples().join(self.path.as_ref().unwrap());
 
         self._images.iter_mut().filter_map(move |(key, img)| {
             if img.is_none() {
