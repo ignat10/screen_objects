@@ -134,6 +134,27 @@ impl ScreenObject {
         
         Some((coords.x, coords.y))
     }
+
+    fn add_sample(&mut self) {
+        let scr = screen::get();
+        let coords: Coords = self.coords
+            .expect("required coords to add a sample.");
+        let size = self.iter_images().next()
+            .expect("required at least 1 sample already in dir, to know size.").dimensions();
+        let path = self.path.as_ref()
+            .expect("required path to add a sample.");
+
+        let crop = image::imageops::crop_imm(
+            &*scr,
+            coords.x as u32,
+            coords.y as u32 ,
+            size.0,
+            size.1
+        ).to_image();
+
+        crop.save(samples().join(path).join("new_sample.png"))
+            .expect("Failed to save sample");
+    }
 }
 
 
