@@ -14,23 +14,25 @@ pub(super) fn images_match(
     sample: &RgbImage,
     coords: Coords,
 ) -> bool {
-    let (w, h) = sample.dimensions();
+    let screen_w = screen.width() as usize;
+    let sample_w = sample.width() as usize;
+    let sample_h = sample.height() as usize;
 
-    let start_row = coords.x as usize * RGB_CHANNELS;
-    let end_row = start_row + w as usize * RGB_CHANNELS;
-    let crop = screen
-        .chunks_exact(screen.width() as usize * RGB_CHANNELS)
-        .skip(coords.y as usize)
-        .take(h as usize)
-        .flat_map(|row| {
-            &row[start_row..end_row]
-        });
-
-    let total_diff: u32 = sample.iter()
-        .zip(crop)
-        .map(|(&a, &b)| a.abs_diff(b) as u32)
-        .sum();
-    TOLERANCE > total_diff as f32 / ((sample.len() * u8::MAX as usize) as f32)
+    let raw_screen = screen.as_raw();
+    let raw_sample = sample.as_raw();
+    
+    let mut diff_sum: u32 = 0;
+    for y in 0..sample_h {
+        let screen_start = (y + coords.y as usize) * screen_w + coords.x as usize;
+        let sample_start = y * sample_w;
+        for x in 0..sample_w {
+            for c in 0..RGB_CHANNELS {
+                diff_sum += raw_screen[(screen_start + x) * RGB_CHANNELS + c]
+                    .abs_diff(raw_sample[(sample_start + x) * RGB_CHANNELS + c]) as u32;
+            }
+        }
+    };
+    TOLERANCE > diff_sum as f32 / (sample.len() * u8::MAX as usize) as f32
 }
 
 
@@ -66,17 +68,13 @@ pub(super) fn find_sample(
                 }
             }
             if diff_sum < min_diff {
-                println!("new best point: ({} {})", x, y);
                 min_diff = diff_sum;
                 (best_x, best_y) = (x, y);
             }
         }
     }
     let checked_bytes = (sample_w / step) * (sample_h / step) * RGB_CHANNELS;
-    dbg!(checked_bytes);
-    dbg!(step);
-    dbg!(min_diff as usize / checked_bytes);
-    dbg!(min_diff as f32 / (checked_bytes * u8::MAX as usize) as f32);
+    // dbg!(min_diff as f32 / (checked_bytes * u8::MAX as usize) as f32);  // tolerance need
     
     return if TOLERANCE > min_diff as f32 / (checked_bytes * u8::MAX as usize) as f32 {
          Some(Coords {
