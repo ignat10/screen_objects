@@ -61,7 +61,7 @@ pub(super) fn find_sample(
                 let screen_start = (y + sy) * screen_w + x;
                 let sample_start = sy * sample_w;
                 for sx in (0..sample_w).step_by(step) {
-                    for c in 0..3 {
+                    for c in 0..RGB_CHANNELS {
                         diff_sum += raw_screen[(screen_start + sx) * RGB_CHANNELS + c]
                             .abs_diff(raw_sample[(sample_start + sx) * RGB_CHANNELS + c]) as u32;
                     }
