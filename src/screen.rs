@@ -1,18 +1,15 @@
-use std::sync::{MappedMutexGuard, Mutex, MutexGuard};
-
-
-
+use std::sync::RwLock;
 use image::{RgbImage, RgbaImage, DynamicImage};
 
 use crate::adb;
 
 
-static SCREEN: Mutex<Option<RgbImage>> =  Mutex::new(None);
+pub(crate) static SCREEN: RwLock<Option<RgbImage>> =  RwLock::new(None);
 
 
 
-pub(super) fn get() -> MappedMutexGuard<'static, RgbImage> {
-    let mut guard = SCREEN.lock().unwrap();
+pub(super) fn set() { 
+    let mut guard = SCREEN.write().unwrap();
     
     if guard.is_none() {
         let (w, h) = adb::dimensions();
@@ -28,11 +25,9 @@ pub(super) fn get() -> MappedMutexGuard<'static, RgbImage> {
 
         *guard = Some(rgb_img);
     }
-    
-    MutexGuard::map(guard, |opt| opt.as_mut().unwrap())
 }
 
 
 pub(super) fn reset() {
-    *SCREEN.lock().unwrap() = None;
+    *SCREEN.write().unwrap() = None;
 }

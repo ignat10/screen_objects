@@ -1,6 +1,3 @@
-#![feature(mapped_lock_guards)]
-
-
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs;
@@ -10,10 +7,11 @@ use std::thread::sleep;
 use std::time::Duration;
 
 use pyo3::prelude::*;
+use rayon::prelude::*;
 use serde::Deserialize;
 use serde_json;
 
-pub mod adb;
+mod adb;
 mod screen;
 mod image_analyzer;
 
@@ -21,11 +19,18 @@ mod image_analyzer;
 
 #[pymodule]
 mod screen_objects {
-    #[pymodule_export]
-    use super::get_objects;
+    use super::*;
 
     #[pymodule_export]
-    use super::ScreenObject;
+    use get_objects;
+
+    #[pymodule_export]
+    use ScreenObject;
+
+    #[pyfunction]
+    fn reset_screen() {
+        screen::reset();
+    }
 }
 
 
@@ -85,8 +90,8 @@ impl ScreenObject {
 
     #[pyo3(signature = (steps=None))]
     fn compare(&mut self, steps: Option<u16>) -> bool {
+        screen::set();
     
-        let screen_img = screen::get();
         let coords = if let Some(steps) = steps {
             let delta = self.delta.as_ref().unwrap();
             self.coords.unwrap().with_delta(delta, steps)
@@ -96,50 +101,56 @@ impl ScreenObject {
 
         self.iter_images()
             .any(|img| {
-                image_analyzer::images_match(&*screen_img, img, coords)
+                image_analyzer::images_match(img, coords)
             })
     }
 
-    fn tap_if_found(&mut self) -> bool {
-        let screen = &*screen::get();
+    fn tap_if_found(&mut self) -> PyResult<bool> {
+        screen::set();
 
         let coords = self.iter_images()
-            .find_map(|sample_image|
-            image_analyzer::find_sample(screen, sample_image)
+            .find_map_any(|sample_image|
+            image_analyzer::find_sample(sample_image)
         );
-
+    
         if let Some(coords) = coords {
             let size = self.iter_images()
-                .next()
+                .find_any(|_| true)
                 .unwrap()
                 .dimensions();
             let center = Coords {
                 x: coords.x + size.0 as u16 / 2,
                 y: coords.y + size.1 as u16 / 2
             };
+            Python::attach(|py| py.check_signals())?;
 
             adb::tap(center);
             screen::reset();
-            return true;
+            return Ok(true);
         } else {
-            return false;
+            return Ok(false);
         }
     }
 
     fn find_object(&mut self) -> Option<(u16, u16)> {
-        let screen = &*screen::get();
+        screen::set();
+
         let coords = self
             .iter_images()
-            .find_map(|img| image_analyzer::find_sample(screen, img))?;
+            .find_map_any(|img| image_analyzer::find_sample(img))?;
         
         Some((coords.x, coords.y))
     }
 
     fn add_sample(&mut self) {
-        let scr = screen::get();
+        screen::set();
+
+        let lock = screen::SCREEN.read().unwrap();
+        let scr = lock.as_ref().unwrap();
+
         let coords: Coords = self.coords
             .expect("required coords to add a sample.");
-        let size = self.iter_images().next()
+        let size = self.iter_images().find_any(|_| true)
             .expect("required at least 1 sample already in dir, to know size.").dimensions();
         let path = self.path.as_ref()
             .expect("required path to add a sample.");
@@ -169,14 +180,14 @@ impl ScreenObject {
         }
     }
 
-    fn iter_images(&mut self) -> impl Iterator<Item = &image::RgbImage> {
+    fn iter_images(&mut self) -> impl ParallelIterator<Item = &image::RgbImage> {
         if self._images.is_empty() {
             self.init();
         }
 
         let path = samples().join(self.path.as_ref().unwrap());
 
-        self._images.iter_mut().filter_map(move |(key, img)| {
+        self._images.par_iter_mut().filter_map(move |(key, img)| {
             if img.is_none() {
                 *img = Some(
                     image::open(path.join(key))
