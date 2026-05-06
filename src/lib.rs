@@ -62,7 +62,7 @@ struct ScreenObject {
     delta: Option<Delta>,
     path: Option<PathBuf>,
     #[serde(skip)]
-    _images: HashMap<OsString, Option<image::RgbImage>>
+    images: HashMap<OsString, OnceLock<image::RgbImage>>
 }
 
 
@@ -197,27 +197,24 @@ impl ScreenObject {
         
         for entry in fs::read_dir(samples_dir).unwrap() {
             let entry = entry.unwrap();
-            self._images.insert(entry.file_name(), None);
+            self.images.insert(entry.file_name(), OnceLock::new());
         }
     }
 
     fn iter_images(&mut self) -> impl ParallelIterator<Item = &image::RgbImage> {
-        if self._images.is_empty() {
+        if self.images.is_empty() {
             self.init();
         }
 
         let path = samples().join(self.path.as_ref().unwrap());
 
-        self._images.par_iter_mut().filter_map(move |(key, img)| {
-            if img.is_none() {
-                *img = Some(
-                    image::open(path.join(key))
+        self.images.par_iter_mut().filter_map(move |(key, cell)| {
+            cell.get_or_init(|| {
+                image::open(path.join(key))
                     .expect("Failed to open sample image")
                     .to_rgb8()
-                );
-            }
-
-            img.as_ref()
+            });
+            cell.get()
         })
     }
 }
