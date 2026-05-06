@@ -87,7 +87,7 @@ fn scan() -> Option<String> {
 
 
 fn input_port() -> Option<String> {
-    println!("enter device port: ");
+    println!("Turn on USB debugging or enter wireless debugging port: ");
     let mut input = String::new();
 
     stdin()
