@@ -3,8 +3,6 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::OnceLock;
-use std::thread::sleep;
-use std::time::Duration;
 
 use pyo3::prelude::*;
 use rayon::prelude::*;
@@ -68,35 +66,35 @@ struct ScreenObject {
 
 #[pymethods]
 impl ScreenObject {
-    #[pyo3(signature = (delay=None, steps=None, repeat=None))]
-    fn tap(&self, delay: Option<f32>, steps: Option<u16>, repeat: Option<u8>) {
-        let coords = if let Some(steps) = steps {
+    #[pyo3(signature = (offset_steps=None))]
+    fn tap(&self, offset_steps: Option<u16>) {
+        let coords = if let Some(steps) = offset_steps {
             let delta = self.delta.as_ref().unwrap();
             self.coords.unwrap().with_delta(delta, steps)
         } else {
             self.coords.unwrap()
         };
 
-        if let Some(secs) = delay {
-            sleep(Duration::from_secs_f32(secs))
-        };
-
-        for _ in 0..repeat.unwrap_or(1) {
-            adb::tap(coords);
-        }
+        adb::tap(coords);
         screen::reset();
     }
 
+    fn spam_tap(&self, n: u8, interval: f32) {
+        for _ in 0..n {
+            self.tap(None);
+            std::thread::sleep(std::time::Duration::from_secs_f32(interval));
+        }
+    }
 
-    #[pyo3(signature = (steps=None))]
-    fn compare(&mut self, steps: Option<u16>) -> bool {
+    #[pyo3(signature = (offset_steps=None))]
+    fn compare(&mut self, offset_steps: Option<u16>) -> bool {
         screen::set();
         let guard = screen::SCREENSHOT.read().unwrap();
 
         let screenshot = guard.as_ref().unwrap();
         let screen_view = utils::rgb_to_view(screenshot);
 
-        let coords = if let Some(steps) = steps {
+        let coords = if let Some(steps) = offset_steps {
             let delta = self.delta.as_ref().unwrap();
             self.coords.unwrap().with_delta(delta, steps)
         } else {
