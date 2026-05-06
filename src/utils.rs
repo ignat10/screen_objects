@@ -1,5 +1,6 @@
 use pixen::ImageView;
 
+#[inline]
 pub(crate) fn rgb_to_view<'a>(rgb: &'a image::RgbImage) -> ImageView<'a> {
     ImageView {
         buffer: rgb.as_raw(),
