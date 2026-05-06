@@ -10,11 +10,11 @@ use pyo3::prelude::*;
 use rayon::prelude::*;
 use serde::Deserialize;
 use serde_json;
+use pixen;
 
 mod adb;
 mod screen;
-mod image_analyzer;
-
+mod utils;
 
 
 #[pymodule]
@@ -91,7 +91,11 @@ impl ScreenObject {
     #[pyo3(signature = (steps=None))]
     fn compare(&mut self, steps: Option<u16>) -> bool {
         screen::set();
-    
+        let guard = screen::SCREENSHOT.read().unwrap();
+
+        let screenshot = guard.as_ref().unwrap();
+        let screen_view = utils::rgb_to_view(screenshot);
+
         let coords = if let Some(steps) = steps {
             let delta = self.delta.as_ref().unwrap();
             self.coords.unwrap().with_delta(delta, steps)
@@ -101,16 +105,27 @@ impl ScreenObject {
 
         self.iter_images()
             .any(|img| {
-                image_analyzer::images_match(img, coords)
+                let sample_view = utils::rgb_to_view(&img);
+                pixen::images_match(&screen_view, &sample_view, coords.x as usize, coords.y as usize)
             })
     }
 
     fn tap_if_found(&mut self) -> PyResult<bool> {
         screen::set();
+        let guard = screen::SCREENSHOT.read().unwrap();
+        let screenshot = guard.as_ref().unwrap();
+        let screen_view = pixen::ImageView{
+            buffer: screenshot,
+            channels: screen::CHANNELS,
+            width: screenshot.width() as usize,
+            height: screenshot.height() as usize,
+        };
 
         let coords = self.iter_images()
-            .find_map_any(|sample_image|
-            image_analyzer::find_sample(sample_image)
+            .find_map_any(|sample_image| {
+                let sample_view = utils::rgb_to_view(&sample_image);
+                pixen::find_sample(&screen_view, &sample_view)
+            }
         );
     
         if let Some(coords) = coords {
@@ -119,8 +134,8 @@ impl ScreenObject {
                 .unwrap()
                 .dimensions();
             let center = Coords {
-                x: coords.x + size.0 as u16 / 2,
-                y: coords.y + size.1 as u16 / 2
+                x: (coords.0 as u32 + size.0 / 2) as u16,
+                y: (coords.1 as u32 + size.1 / 2) as u16
             };
             Python::attach(|py| py.check_signals())?;
 
@@ -132,20 +147,26 @@ impl ScreenObject {
         }
     }
 
-    fn find_object(&mut self) -> Option<(u16, u16)> {
+    fn find_object(&mut self) -> Option<(usize, usize)> {
         screen::set();
+        let guard = screen::SCREENSHOT.read().unwrap();
+        let screenshot = guard.as_ref().unwrap();
+        let screen_view = utils::rgb_to_view(screenshot);
 
         let coords = self
             .iter_images()
-            .find_map_any(|img| image_analyzer::find_sample(img))?;
+            .find_map_any(|img| {
+                let sample_view = utils::rgb_to_view(&img);
+                pixen::find_sample(&screen_view, &sample_view)
+            })?;
         
-        Some((coords.x, coords.y))
+        Some(coords)
     }
 
     fn add_sample(&mut self) {
         screen::set();
 
-        let lock = screen::SCREEN.read().unwrap();
+        let lock = screen::SCREENSHOT.read().unwrap();
         let scr = lock.as_ref().unwrap();
 
         let coords: Coords = self.coords

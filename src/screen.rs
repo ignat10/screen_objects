@@ -3,13 +3,14 @@ use image::{RgbImage, RgbaImage, DynamicImage};
 
 use crate::adb;
 
+pub(crate) const CHANNELS: usize = 3;
 
-pub(crate) static SCREEN: RwLock<Option<RgbImage>> =  RwLock::new(None);
+pub(super) static SCREENSHOT: RwLock<Option<RgbImage>> =  RwLock::new(None);
 
 
 
 pub(super) fn set() { 
-    let mut guard = SCREEN.write().unwrap();
+    let mut guard = SCREENSHOT.write().unwrap();
     
     if guard.is_none() {
         let (w, h) = adb::dimensions();
@@ -29,5 +30,5 @@ pub(super) fn set() {
 
 
 pub(super) fn reset() {
-    *SCREEN.write().unwrap() = None;
+    *SCREENSHOT.write().unwrap() = None;
 }
