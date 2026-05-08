@@ -219,7 +219,7 @@ impl ScreenObject {
 }
 
 
-#[derive(Deserialize, Copy, Clone)]
+#[derive(Deserialize, Copy, Clone, PartialEq, Eq, Debug)]
 pub(crate) struct Coords {
     x: u16,
     y: u16,
@@ -277,22 +277,22 @@ mod tests {
     use super::*;
 
 
+    const DATA: &str = r#"
+        {
+            "coords": {
+                "x": 100,
+                "y": 200
+            },
+            "delta": {
+                "dir": "Right",
+                "gap": 10
+            },
+            "path": "sample_path"
+        }
+    "#;
     #[test]
     fn screen_object_deserialization() {
-        let data = r#"
-            {
-                "coords": {
-                    "x": 100,
-                    "y": 200
-                },
-                "delta": {
-                    "PosX": 10
-                },
-                "path": "sample_path"
-            }
-        "#;
-
-        let result = serde_json::from_str::<ScreenObject>(&data);
+        let result = serde_json::from_str::<ScreenObject>(DATA);
 
         assert!(result.is_ok(), "{}", result.err().unwrap());
 
@@ -304,7 +304,19 @@ mod tests {
 
         assert_eq!(coords.x, 100);
         assert_eq!(coords.y, 200);
-        assert_eq!(delta, Delta::PosX(10));
+        assert_eq!(delta.dir, Dir::Right);
+        assert_eq!(delta.gap, 10);
         assert_eq!(path, PathBuf::from("sample_path"));
+    }
+
+    #[test]
+    fn delta_test() {
+        let obj: ScreenObject = serde_json::from_str(DATA).unwrap();
+
+        let coords = obj.coords.unwrap();
+        let delta = obj.delta.as_ref().unwrap();
+        assert_eq!(coords.with_delta(delta, 0), coords);
+        assert_eq!(coords.with_delta(delta, 1), Coords { x: coords.x + delta.gap, y: coords.y });
+        assert_eq!(coords.with_delta(delta, 3), Coords { x: coords.x + delta.gap * 3, y: coords.y });
     }
 }
