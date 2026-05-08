@@ -96,8 +96,7 @@ fn input_port() -> Option<String> {
 
     let port = input.trim();
 
-
-    if port.parse::<u8>().is_ok() && port.len() == ADB_PORT_LENGTH {
+    if port.parse::<u32>().is_ok() && port.len() == ADB_PORT_LENGTH {
         Some(port.to_string())
     } else {
         None
