@@ -231,34 +231,37 @@ impl Coords {
         let x = self.x;
         let y = self.y;
 
-        match delta {
-            Delta::PosX(interval) => Coords {
-                x: x + interval * steps,
-                y: y,
+        let dir = &delta.dir;
+        let offset = delta.gap * steps;
+        Coords {
+            x: match dir {
+                Dir::Right => x + offset,
+                Dir::Left => x - offset,
+                _ => x
             },
-            Delta::NegX(interval) => Coords {
-                x: x - interval * steps,
-                y: y,
-            },
-            Delta::PosY(interval) => Coords {
-                x: x,
-                y: y + interval * steps,
-            },
-            Delta::NegY(interval) => Coords {
-                x: x,
-                y: y - interval * steps
+            y: match dir {
+                Dir::Up => y + offset,
+                Dir::Down => y - offset,
+                _ => y
             }
         }
     }
 }
 
 
-#[derive(Deserialize, PartialEq, Debug)]
-enum Delta {
-    PosX(u16),
-    NegX(u16),
-    PosY(u16),
-    NegY(u16),
+#[derive(Deserialize)]
+struct Delta {
+    dir: Dir,
+    gap: u16
+}
+
+
+#[derive(Deserialize, PartialEq, Eq, Debug, Clone, Copy)]
+enum Dir {
+    Up,
+    Down,
+    Left,
+    Right,
 }
 
 
