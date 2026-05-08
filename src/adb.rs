@@ -97,7 +97,7 @@ fn input_port() -> Option<String> {
     let port = input.trim();
 
 
-    return if port.parse::<u8>().is_ok() && port.len() == ADB_PORT_LENGTH {
+    if port.parse::<u8>().is_ok() && port.len() == ADB_PORT_LENGTH {
         Some(port.to_string())
     } else {
         None
@@ -120,7 +120,7 @@ fn device_action(args: &[&str]) -> Output {
 }
 
 
-fn run(args: &[&str]) -> std::process::Output {
+fn run(args: &[&str]) -> Output {
     Command::new("adb")
         .args(args)
         .output()

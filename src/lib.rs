@@ -68,11 +68,12 @@ struct ScreenObject {
 impl ScreenObject {
     #[pyo3(signature = (offset_steps=None))]
     fn tap(&self, offset_steps: Option<u16>) {
+        let coords = self.coords.unwrap();
         let coords = if let Some(steps) = offset_steps {
             let delta = self.delta.as_ref().unwrap();
-            self.coords.unwrap().with_delta(delta, steps)
+            coords.with_delta(delta, steps)
         } else {
-            self.coords.unwrap()
+            coords
         };
 
         adb::tap(coords);
@@ -139,9 +140,9 @@ impl ScreenObject {
 
             adb::tap(center);
             screen::reset();
-            return Ok(true);
+            Ok(true)
         } else {
-            return Ok(false);
+            Ok(false)
         }
     }
 
