@@ -1,6 +1,8 @@
+#![feature(vec_into_chunks)]
+
 use std::collections::HashMap;
 use std::ffi::OsString;
-use std::fs;
+use std::{fs, io};
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
@@ -8,11 +10,11 @@ use pyo3::prelude::*;
 use rayon::prelude::*;
 use serde::Deserialize;
 use serde_json;
-use pixen;
+use pixen::*;
+use stb_image::image;
 
 mod adb;
 mod screen;
-mod utils;
 
 
 #[pymodule]
@@ -60,7 +62,7 @@ struct ScreenObject {
     delta: Option<Delta>,
     path: Option<PathBuf>,
     #[serde(skip)]
-    images: HashMap<OsString, OnceLock<image::RgbImage>>
+    images: HashMap<OsString, OnceLock<Image>>
 }
 
 
@@ -91,9 +93,7 @@ impl ScreenObject {
     fn compare(&mut self, offset_steps: Option<u16>) -> bool {
         screen::set();
         let guard = screen::SCREENSHOT.read().unwrap();
-
         let screenshot = guard.as_ref().unwrap();
-        let screen_view = utils::rgb_to_view(screenshot);
 
         let coords = if let Some(steps) = offset_steps {
             let delta = self.delta.as_ref().unwrap();
@@ -104,8 +104,7 @@ impl ScreenObject {
 
         self.iter_images()
             .any(|img| {
-                let sample_view = utils::rgb_to_view(&img);
-                pixen::images_match(&screen_view, &sample_view, coords.x as usize, coords.y as usize)
+                images_match(&screenshot, &img, coords.x as usize, coords.y as usize)
             })
     }
 
@@ -113,50 +112,41 @@ impl ScreenObject {
         screen::set();
         let guard = screen::SCREENSHOT.read().unwrap();
         let screenshot = guard.as_ref().unwrap();
-        let screen_view = pixen::ImageView{
-            buffer: screenshot,
-            channels: screen::CHANNELS,
-            width: screenshot.width() as usize,
-            height: screenshot.height() as usize,
-        };
+
 
         let coords = self.iter_images()
             .find_map_any(|sample_image| {
-                let sample_view = utils::rgb_to_view(&sample_image);
-                pixen::find_sample(&screen_view, &sample_view)
+                find_sample(screenshot, &sample_image)
             }
         );
     
-        if let Some(coords) = coords {
-            let size = self.iter_images()
+        Ok(if let Some(coords) = coords {
+            let sample = self.iter_images()
                 .find_any(|_| true)
-                .unwrap()
-                .dimensions();
+                .unwrap();
             let center = Coords {
-                x: (coords.0 as u32 + size.0 / 2) as u16,
-                y: (coords.1 as u32 + size.1 / 2) as u16
+                x: (coords.0 + sample.width / 2) as u16,
+                y: (coords.1 + sample.height / 2) as u16
             };
             Python::attach(|py| py.check_signals())?;
 
             adb::tap(center);
             screen::reset();
-            Ok(true)
+            true
         } else {
-            Ok(false)
-        }
+            false
+        })
     }
 
     fn find_object(&mut self) -> Option<(usize, usize)> {
         screen::set();
         let guard = screen::SCREENSHOT.read().unwrap();
         let screenshot = guard.as_ref().unwrap();
-        let screen_view = utils::rgb_to_view(screenshot);
 
         let coords = self
             .iter_images()
             .find_map_any(|img| {
-                let sample_view = utils::rgb_to_view(&img);
-                pixen::find_sample(&screen_view, &sample_view)
+                find_sample(screenshot, img)
             })?;
         
         Some(coords)
@@ -166,25 +156,45 @@ impl ScreenObject {
         screen::set();
 
         let lock = screen::SCREENSHOT.read().unwrap();
-        let scr = lock.as_ref().unwrap();
+        let screenshot = lock.as_ref().unwrap();
 
         let coords: Coords = self.coords
             .expect("required coords to add a sample.");
-        let size = self.iter_images().find_any(|_| true)
-            .expect("required at least 1 sample already in dir, to know size.").dimensions();
         let path = self.path.as_ref()
-            .expect("required path to add a sample.");
+            .expect("required path to add a sample.")
+            .clone();
+        let sample = self.iter_images().find_any(|_| true)
+            .expect("required at least 1 sample already in dir, to know size.");
 
-        let crop = image::imageops::crop_imm(
-            &*scr,
-            coords.x as u32,
-            coords.y as u32 ,
-            size.0,
-            size.1
-        ).to_image();
 
-        crop.save(samples().join(path).join("new_sample.png"))
-            .expect("Failed to save sample");
+        let x = coords.x as usize;
+        let y = coords.y as usize;
+
+        let w = screenshot.width;
+        let h = sample.height;
+        let c = sample.channels;
+
+        let row_start = x * c;
+        let row_end = row_start + sample.width * c;
+
+        let crop: Vec<u8> = screenshot.buffer
+            .chunks_exact(w * c)
+            .skip(y)
+            .take(h)
+            .flat_map(|row| {
+                row[row_start..row_end].iter().copied()
+            })
+            .collect();
+
+        let file = fs::File::create(path).unwrap();
+        let writer = io::BufWriter::new(file);
+
+        let mut encoder = png::Encoder::new(writer, w as u32, h as u32);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(crop.as_slice()).unwrap();
     }
 }
 
@@ -200,7 +210,7 @@ impl ScreenObject {
         }
     }
 
-    fn iter_images(&mut self) -> impl ParallelIterator<Item = &image::RgbImage> {
+    fn iter_images(&mut self) -> impl ParallelIterator<Item = &Image> {
         if self.images.is_empty() {
             self.init();
         }
@@ -209,9 +219,17 @@ impl ScreenObject {
 
         self.images.par_iter_mut().filter_map(move |(key, cell)| {
             cell.get_or_init(|| {
-                image::open(path.join(key))
-                    .expect("Failed to open sample image")
-                    .to_rgb8()
+                let img = if let image::LoadResult::ImageU8(img) = image::load(path.join(key)) {
+                    img
+                } else {
+                    panic!("Failed to open sample image")
+                };
+                Image {
+                    buffer: img.data,
+                    channels: img.depth,
+                    width: img.width,
+                    height: img.height,
+                }
             });
             cell.get()
         })
