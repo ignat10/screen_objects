@@ -95,11 +95,12 @@ impl ScreenObject {
         let guard = screen::SCREENSHOT.read().unwrap();
         let screenshot = guard.as_ref().unwrap();
 
+        let coords = self.coords.as_ref().unwrap();
         let coords = if let Some(steps) = offset_steps {
             let delta = self.delta.as_ref().unwrap();
-            self.coords.unwrap().with_delta(delta, steps)
+            coords.with_delta(delta, steps)
         } else {
-            self.coords.unwrap()
+            coords.clone()
         };
 
         self.iter_images()
