@@ -113,7 +113,7 @@ fn connect(port: &str) -> bool {
 
 
 fn device_action(args: &[&str]) -> Output {
-    let serial = DEVICE_SERIAL.get().unwrap();
+    let serial = DEVICE_SERIAL.get().expect("serial not set. call device_config() before using actions.");
     let args = [&["-s", serial], args].concat();
     run(&args)
 }

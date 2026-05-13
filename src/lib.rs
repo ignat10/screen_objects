@@ -176,7 +176,9 @@ impl ScreenObject {
         let x = coords.x as usize;
         let y = coords.y as usize;
 
-        let w = screenshot.width();
+        let screen_w = screenshot.width();
+
+        let sample_w = sample.width();
         let h = sample.height();
         let c = sample.channels();
 
@@ -184,7 +186,7 @@ impl ScreenObject {
         let row_end = row_start + sample.width() * c;
 
         let crop: Vec<u8> = screenshot.as_raw()
-            .chunks_exact(w * c)
+            .chunks_exact(screen_w * c)
             .skip(y)
             .take(h)
             .flat_map(|row| {
@@ -192,11 +194,11 @@ impl ScreenObject {
             })
             .collect();
 
-        let file = fs::File::create(path).unwrap();
+        let file = fs::File::create(samples().join(path).join("new_sample.png")).unwrap();
         let writer = io::BufWriter::new(file);
 
-        let mut encoder = Encoder::new(writer, w as u32, h as u32);
-        encoder.set_color(png::ColorType::Rgb);
+        let mut encoder = Encoder::new(writer, sample_w as u32, h as u32);
+        encoder.set_color(ColorType::Rgb);
         encoder.set_depth(png::BitDepth::Eight);
 
         let mut writer = encoder.write_header().unwrap();
