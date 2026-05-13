@@ -220,17 +220,24 @@ impl ScreenObject {
 
         self.images.par_iter_mut().filter_map(move |(key, cell)| {
             cell.get_or_init(|| {
-                let img = if let image::LoadResult::ImageU8(img) = image::load(path.join(key)) {
-                    img
-                } else {
-                    panic!("Failed to open sample image")
-                };
-                Image {
-                    buffer: img.data,
-                    channels: img.depth,
-                    width: img.width,
-                    height: img.height,
-                }
+                let file = fs::File::open(path.join(key)).unwrap();
+                let reader = io::BufReader::new(file);
+
+                let decoder = Decoder::new(reader);
+                let mut reader = decoder.read_info().unwrap();
+
+                let mut buf = vec![0; reader.output_buffer_size().unwrap()];
+                let info = reader.next_frame(&mut buf).unwrap();
+
+                buf.drain(info.buffer_size()..);
+                dbg!(buf.len(), info.buffer_size(), info.width, info.height, info.bit_depth, info.color_type, info.line_size);
+
+                Image::new(
+                    buf,
+                    info.width as usize,
+                    info.height as usize,
+                    CHANNELS
+                )
             });
             cell.get()
         })
