@@ -11,12 +11,14 @@ use rayon::prelude::*;
 use serde::Deserialize;
 use serde_json;
 use pixen::{Image, images_match, find_sample};
-use png::{Decoder, Encoder};
-use crate::screen::CHANNELS;
+use png::{ColorType, Decoder, Encoder};
 
 mod adb;
 mod screen;
+pub mod utils;
 
+use crate::screen::CHANNELS;
+use crate::utils::rgba_into_rgb;
 
 #[pymodule]
 mod screen_objects {
@@ -186,7 +188,7 @@ impl ScreenObject {
             .skip(y)
             .take(h)
             .flat_map(|row| {
-                row[row_start..row_end].iter().copied()
+                row[row_start..row_end].to_vec()
             })
             .collect();
 
@@ -194,7 +196,7 @@ impl ScreenObject {
         let writer = io::BufWriter::new(file);
 
         let mut encoder = Encoder::new(writer, w as u32, h as u32);
-        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_color(png::ColorType::Rgb);
         encoder.set_depth(png::BitDepth::Eight);
 
         let mut writer = encoder.write_header().unwrap();
@@ -221,7 +223,7 @@ impl ScreenObject {
 
         let path = samples().join(self.path.as_ref().unwrap());
 
-        self.images.par_iter_mut().filter_map(move |(key, cell)| {
+        self.images.par_iter_mut().map(move |(key, cell)| {
             cell.get_or_init(|| {
                 let file = fs::File::open(path.join(key)).unwrap();
                 let reader = io::BufReader::new(file);
@@ -233,16 +235,20 @@ impl ScreenObject {
                 let info = reader.next_frame(&mut buf).unwrap();
 
                 buf.drain(info.buffer_size()..);
-                dbg!(buf.len(), info.buffer_size(), info.width, info.height, info.bit_depth, info.color_type, info.line_size);
+
+                let rgb = match info.color_type {
+                    ColorType::Rgba => rgba_into_rgb(buf),
+                    ColorType::Rgb => buf,
+                    _ => panic!("unsupported color type")
+                };
 
                 Image::new(
-                    buf,
+                    rgb,
                     info.width as usize,
                     info.height as usize,
                     CHANNELS
                 )
-            });
-            cell.get()
+            })
         })
     }
 }
