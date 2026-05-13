@@ -23,12 +23,12 @@ pub(super) fn set() {
             rgb_bytes.push(b);
         }
 
-        let image = Image {
-            buffer: rgb_bytes,
-            width: w as usize,
-            height: h as usize,
-            channels: CHANNELS
-        };
+        let image = Image::new(
+            rgb_bytes,
+            w as usize,
+            h as usize,
+            CHANNELS
+        );
 
         *guard = Some(image);
     }

@@ -10,8 +10,9 @@ use pyo3::prelude::*;
 use rayon::prelude::*;
 use serde::Deserialize;
 use serde_json;
-use pixen::*;
-use stb_image::image;
+use pixen::{Image, images_match, find_sample};
+use png::{Decoder, Encoder};
+use crate::screen::CHANNELS;
 
 mod adb;
 mod screen;
@@ -126,8 +127,8 @@ impl ScreenObject {
                 .find_any(|_| true)
                 .unwrap();
             let center = Coords {
-                x: (coords.0 + sample.width / 2) as u16,
-                y: (coords.1 + sample.height / 2) as u16
+                x: (coords.0 + sample.width() / 2) as u16,
+                y: (coords.1 + sample.height() / 2) as u16
             };
             Python::attach(|py| py.check_signals())?;
 
@@ -171,14 +172,14 @@ impl ScreenObject {
         let x = coords.x as usize;
         let y = coords.y as usize;
 
-        let w = screenshot.width;
-        let h = sample.height;
-        let c = sample.channels;
+        let w = screenshot.width();
+        let h = sample.height();
+        let c = sample.channels();
 
         let row_start = x * c;
-        let row_end = row_start + sample.width * c;
+        let row_end = row_start + sample.width() * c;
 
-        let crop: Vec<u8> = screenshot.buffer
+        let crop: Vec<u8> = screenshot.as_raw()
             .chunks_exact(w * c)
             .skip(y)
             .take(h)
@@ -190,7 +191,7 @@ impl ScreenObject {
         let file = fs::File::create(path).unwrap();
         let writer = io::BufWriter::new(file);
 
-        let mut encoder = png::Encoder::new(writer, w as u32, h as u32);
+        let mut encoder = Encoder::new(writer, w as u32, h as u32);
         encoder.set_color(png::ColorType::Rgba);
         encoder.set_depth(png::BitDepth::Eight);
 
