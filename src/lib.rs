@@ -32,6 +32,11 @@ mod screen_objects {
     fn reset_screen() {
         screen::reset();
     }
+
+    #[pyfunction]
+    fn device_config(ip: String) {
+        adb::device_config(ip);
+    }
 }
 
 
@@ -43,16 +48,13 @@ fn samples() -> &'static PathBuf {
 
 
 #[pyfunction]
-fn get_objects(samples_dir: PathBuf, objects: PathBuf, ip: String) -> HashMap<String, ScreenObject> {
+fn get_objects(samples_dir: PathBuf, objects: PathBuf) -> HashMap<String, ScreenObject> {
     SAMPLES.set(samples_dir).unwrap();
-
-    adb::device_config(ip);
 
     serde_json::from_reader(
         fs::File::open(objects)
         .expect("Failed open file")
-    )
-    .expect("Failed to parse JSON data")
+    ).expect("Failed to parse JSON data")
 }
 
 
