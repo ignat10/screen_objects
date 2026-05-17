@@ -246,8 +246,8 @@ impl ScreenObject {
 
                 Image::new(
                     rgb,
-                    info.width as usize,
-                    info.height as usize,
+                    info.width,
+                    info.height,
                     CHANNELS
                 )
             })
