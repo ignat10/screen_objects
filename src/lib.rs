@@ -4,16 +4,17 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 use std::{fs, io};
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::{OnceLock, LazyLock, RwLock};
 
 use pyo3::prelude::*;
+use walkdir::WalkDir;
 use rayon::prelude::*;
 use serde::Deserialize;
-use serde_json;
+use serde_json::from_reader;
 use pixen::{Image, images_match, find_sample};
 use png::{ColorType, Decoder, Encoder};
 
-mod adb;
+pub mod adb;
 mod screen;
 pub mod utils;
 
@@ -24,8 +25,47 @@ use crate::utils::rgba_into_rgb;
 mod screen_objects {
     use super::*;
 
-    #[pymodule_export]
-    use get_objects;
+    #[pyfunction]
+    fn get_objects(samples_dir: PathBuf) -> HashMap<String, ScreenObject> {
+        SAMPLES.set(samples_dir.clone()).unwrap();
+
+        let dirs: Vec<PathBuf> = WalkDir::new(&samples_dir)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|entry| entry.file_type().is_dir())
+            .map(|entry| entry.into_path())
+            .filter(|dir| {
+                dir.read_dir()
+                    .unwrap()
+                    .all(|entry| entry.unwrap().path().is_file())
+            })
+            .map(|dir| dir.strip_prefix(&samples_dir).unwrap().to_path_buf())
+            .collect();
+
+        let mut lock  = DATA.write().unwrap();
+
+        let mut objects = HashMap::new();
+        for dir in dirs {
+            let name = dir.file_name().unwrap().to_str().unwrap().to_string();
+            if let Some(val) = lock.get_mut(&name) {
+                let first = val.first();
+                objects.insert(
+                    name,
+                    ScreenObject::new(
+                        dir,
+                        if let Some(first) = first && val.iter().all(|x| x == first) {
+                            Some(Coords { x: first[0], y: first[1] })
+                        } else {
+                            None
+                        }
+                    )
+                );
+            }
+        }
+
+
+        HashMap::new()
+    }
 
     #[pymodule_export]
     use ScreenObject;
@@ -36,37 +76,41 @@ mod screen_objects {
     }
 
     #[pyfunction]
-    fn device_config(ip: String) {
+    fn device_config(ip: Option<String>) {
         adb::device_config(ip);
     }
 }
 
 
 static SAMPLES: OnceLock<PathBuf> = OnceLock::new();
+static DATA_PATH: LazyLock<PathBuf> = LazyLock::new(|| samples().parent().unwrap().join("objects_data.json"));
+static DATA: LazyLock<RwLock<HashMap<String, Vec<[u16; 2]>>>> = LazyLock::new(|| {
+    let path = DATA_PATH.clone();
+
+    if !path.exists() {
+        fs::write(&path, "{}").expect("Failed to write empty file");
+    }
+
+    let file = fs::File::open(&path).expect("Failed to open file");
+
+    let map: HashMap<String, Vec<[u16; 2]>> =
+        from_reader(file).expect("Failed to parse JSON");
+
+    RwLock::new(map)
+});
 
 fn samples() -> &'static PathBuf {
     SAMPLES.get().unwrap()
 }
 
 
-#[pyfunction]
-fn get_objects(samples_dir: PathBuf, objects: PathBuf) -> HashMap<String, ScreenObject> {
-    SAMPLES.set(samples_dir).unwrap();
 
-    serde_json::from_reader(
-        fs::File::open(objects)
-        .expect("Failed open file")
-    ).expect("Failed to parse JSON data")
-}
 
 
 #[pyclass]
-#[derive(Deserialize)]
 struct ScreenObject {
+    path: PathBuf,
     coords: Option<Coords>,
-    delta: Option<Delta>,
-    path: Option<PathBuf>,
-    #[serde(skip)]
     images: HashMap<OsString, OnceLock<Image>>
 }
 
@@ -208,6 +252,13 @@ impl ScreenObject {
 
 
 impl ScreenObject {
+    fn new(path: PathBuf, coords: Option<Coords>) -> Self {
+        Self {
+            path,
+            coords,
+            images: HashMap::new()
+        }
+    }
     fn init(&mut self) {
         let path = self.path.as_ref().unwrap();
         let samples_dir = samples().join(path);
