@@ -13,20 +13,24 @@ static DEVICE_SERIAL: OnceLock<String> = OnceLock::new();
 
 
 
-pub(super) fn device_config(ip: String) {
+pub(super) fn device_config(ip: Option<String>) {
     println!("connecting adb device...");
 
     let mut serial: Option<String> = scan();
 
+    if let Some(ip) = ip {
+        while serial.is_none() {
+            let port = input_port();
+            if let Some(port) = port {
+                connect(&format!("{}:{}", ip, port));
+            }
 
-    while scan().is_none() {
-
-        let port = input_port();
-        if let Some(port) = port {
-            connect(&format!("{}:{}", ip, port));
+            serial = scan();
         }
-
-        serial = scan();
+    } else {
+        while serial.is_none() {
+            serial = scan();
+        }
     }
 
     DEVICE_SERIAL.set(serial.unwrap()).unwrap();
