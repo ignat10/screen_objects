@@ -82,10 +82,9 @@ mod screen_objects {
 }
 
 
-static SAMPLES: OnceLock<PathBuf> = OnceLock::new();
-static DATA_PATH: LazyLock<PathBuf> = LazyLock::new(|| samples().parent().unwrap().join("objects_data.json"));
+static DATA_PATH: OnceLock<PathBuf> = OnceLock::new();
 static DATA: LazyLock<RwLock<HashMap<String, Vec<[u16; 2]>>>> = LazyLock::new(|| {
-    let path = DATA_PATH.clone();
+    let path = DATA_PATH.get().expect("DATA_PATH must be initialized");
 
     if !path.exists() {
         fs::write(&path, "{}").expect("Failed to write empty file");
@@ -99,9 +98,6 @@ static DATA: LazyLock<RwLock<HashMap<String, Vec<[u16; 2]>>>> = LazyLock::new(||
     RwLock::new(map)
 });
 
-fn samples() -> &'static PathBuf {
-    SAMPLES.get().unwrap()
-}
 
 
 
@@ -209,9 +205,6 @@ impl ScreenObject {
 
         let coords = self.coords()
             .expect("required coords to add a sample.");
-        let path = self.path.as_ref()
-            .expect("required path to add a sample.")
-            .clone();
         let sample = self.iter_images().find_any(|_| true)
             .expect("required at least 1 sample already in dir, to know size.");
 
@@ -237,7 +230,7 @@ impl ScreenObject {
             })
             .collect();
 
-        let file = fs::File::create(samples().join(path).join("new_sample.png")).unwrap();
+        let file = fs::File::create(&self.path.join("new_sample.png")).unwrap();
         let writer = io::BufWriter::new(file);
 
         let mut encoder = Encoder::new(writer, sample_w as u32, h as u32);
@@ -258,10 +251,7 @@ impl ScreenObject {
         }
     }
     fn init(&mut self) {
-        let path = self.path.as_ref().unwrap();
-        let samples_dir = samples().join(path);
-        
-        for entry in fs::read_dir(samples_dir).unwrap() {
+        for entry in fs::read_dir(&self.path).unwrap() {
             let entry = entry.unwrap();
             self.images.insert(entry.file_name(), OnceLock::new());
         }
@@ -293,8 +283,7 @@ impl ScreenObject {
             self.init();
         }
 
-        let path = samples().join(self.path.as_ref().unwrap());
-
+        let path = self.path.clone();
         self.images.par_iter_mut().map(move |(key, cell)| {
             cell.get_or_init(|| {
                 let file = fs::File::open(path.join(key)).unwrap();
