@@ -3,8 +3,6 @@ use std::io::stdin;
 use std::sync::OnceLock;
 
 
-use crate::Coords;
-
 
 const ADB_PORT_LENGTH: usize = 5;
 
@@ -38,8 +36,8 @@ pub(super) fn device_config(ip: Option<String>) {
 }
 
 
-pub(super) fn tap(coords: Coords) {
-    device_action(&["shell", "input", "tap", &coords.x.to_string(), &coords.y.to_string()]);
+pub(super) fn tap(coords: [u16; 2]) {
+    device_action(&["shell", "input", "tap", &coords[0].to_string(), &coords[1].to_string()]);
 }
 
 

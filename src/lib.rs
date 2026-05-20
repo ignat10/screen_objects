@@ -110,24 +110,30 @@ fn samples() -> &'static PathBuf {
 #[pyclass]
 struct ScreenObject {
     path: PathBuf,
-    coords: Option<Coords>,
     images: HashMap<OsString, OnceLock<Image>>
 }
 
 
 #[pymethods]
 impl ScreenObject {
-    #[pyo3(signature = (offset_steps=None))]
-    fn tap(&self, offset_steps: Option<u16>) {
-        let coords = self.coords.unwrap();
-        let coords = if let Some(steps) = offset_steps {
-            let delta = self.delta.as_ref().unwrap();
-            coords.with_delta(delta, steps)
+    fn tap(&mut self) -> bool {
+        let coords: [u16; 2] = if let Some(data_coords) = self.coords() {
+            data_coords
+        } else if let Some(found_coords) = self.find_object() {
+            found_coords
         } else {
-            coords
+            return false;
         };
 
-        adb::tap(coords);
+        let sample = self.iter_images()
+            .find_any(|_| true)
+            .unwrap();
+        let center: [u16; 2] = [
+            coords[0] + sample.width() as u16 / 2,
+            coords[1] + sample.height() as u16 / 2
+        ];
+
+        adb::tap(center);
         screen::reset();
     }
 
@@ -138,24 +144,17 @@ impl ScreenObject {
         }
     }
 
-    #[pyo3(signature = (offset_steps=None))]
-    fn compare(&mut self, offset_steps: Option<u16>) -> bool {
+    fn compare(&mut self) -> Option<bool> {
         screen::set();
         let guard = screen::SCREENSHOT.read().unwrap();
         let screenshot = guard.as_ref().unwrap();
 
-        let coords = self.coords.as_ref().unwrap();
-        let coords = if let Some(steps) = offset_steps {
-            let delta = self.delta.as_ref().unwrap();
-            coords.with_delta(delta, steps)
-        } else {
-            coords.clone()
-        };
+        let coords = self.coords()?;
 
-        self.iter_images()
-            .any(|img| {
-                images_match(&screenshot, &img, coords.x as usize, coords.y as usize)
-            })
+        Some(
+            self.iter_images()
+            .any(|img| images_match(&screenshot, &img, coords))
+        )
     }
 
     fn tap_if_found(&mut self) -> PyResult<bool> {
@@ -208,7 +207,7 @@ impl ScreenObject {
         let lock = screen::SCREENSHOT.read().unwrap();
         let screenshot = lock.as_ref().unwrap();
 
-        let coords: Coords = self.coords
+        let coords = self.coords()
             .expect("required coords to add a sample.");
         let path = self.path.as_ref()
             .expect("required path to add a sample.")
@@ -217,8 +216,8 @@ impl ScreenObject {
             .expect("required at least 1 sample already in dir, to know size.");
 
 
-        let x = coords.x as usize;
-        let y = coords.y as usize;
+        let x = coords[0] as usize;
+        let y = coords[1] as usize;
 
         let screen_w = screenshot.width();
 
@@ -252,10 +251,9 @@ impl ScreenObject {
 
 
 impl ScreenObject {
-    fn new(path: PathBuf, coords: Option<Coords>) -> Self {
+    fn new(path: PathBuf) -> Self {
         Self {
             path,
-            coords,
             images: HashMap::new()
         }
     }
@@ -267,6 +265,27 @@ impl ScreenObject {
             let entry = entry.unwrap();
             self.images.insert(entry.file_name(), OnceLock::new());
         }
+    }
+
+    pub(crate) fn name(&self) -> String {
+        self.path.file_name().unwrap().to_str().unwrap().to_string()
+    }
+
+    pub(crate) fn coords(&self) -> Option<[u16; 2]> {
+        let lock = DATA.read().unwrap();
+        let coords_vec = lock.get(&self.name()).unwrap();
+
+        if coords_vec.len() < 5 {
+            return None;
+        }
+
+        for window in coords_vec.windows(2) {
+            let [c1, c2] = window else { unreachable!() };
+            if c1 != c2 {
+                return None;
+            }
+        }
+        coords_vec.first().cloned()
     }
 
     fn iter_images(&mut self) -> impl ParallelIterator<Item = &Image> {
@@ -305,59 +324,6 @@ impl ScreenObject {
         })
     }
 }
-
-
-#[derive(Deserialize, Copy, Clone, PartialEq, Eq, Debug)]
-pub(crate) struct Coords {
-    x: u16,
-    y: u16,
-}
-
-
-impl Coords {
-    fn with_delta(&self, delta: &Delta, steps: u16) -> Coords {
-        let x = self.x;
-        let y = self.y;
-
-        let dir = &delta.dir;
-        let offset = delta.gap * steps;
-        Coords {
-            x: match dir {
-                Dir::Right => x + offset,
-                Dir::Left => x - offset,
-                _ => x
-            },
-            y: match dir {
-                Dir::Up => y + offset,
-                Dir::Down => y - offset,
-                _ => y
-            }
-        }
-    }
-}
-
-
-#[derive(Deserialize)]
-struct Delta {
-    dir: Dir,
-    gap: u16
-}
-
-
-#[derive(Deserialize, PartialEq, Eq, Debug, Clone, Copy)]
-enum Dir {
-    Up,
-    Down,
-    Left,
-    Right,
-}
-
-
-
-
-
-
-
 
 
 #[cfg(test)]
