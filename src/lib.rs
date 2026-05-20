@@ -9,7 +9,6 @@ use std::sync::{OnceLock, LazyLock, RwLock};
 use pyo3::prelude::*;
 use walkdir::WalkDir;
 use rayon::prelude::*;
-use serde::Deserialize;
 use serde_json::from_reader;
 use pixen::{Image, images_match, find_sample};
 use png::{ColorType, Decoder, Encoder};
@@ -286,47 +285,53 @@ impl ScreenObject {
 mod tests {
     use super::*;
 
+    use serde_json::{ json, Value, to_string_pretty };
+    use tempfile::{tempdir, TempDir};
 
-    const DATA: &str = r#"
-        {
-            "coords": {
-                "x": 100,
-                "y": 200
-            },
-            "delta": {
-                "dir": "Right",
-                "gap": 10
-            },
-            "path": "sample_path"
+
+    static SAMPLES: LazyLock<TempDir> = LazyLock::new(|| tempdir().unwrap());
+    static DATA: LazyLock<Value> = LazyLock::new(|| {
+        json!({
+            "alpha": [
+                [100, 200],
+                [100, 200],
+                [100, 200],
+                [100, 200],
+                [100, 200]
+            ],
+            "delta": [
+                [0, 0],
+                [0, 0],
+                [1, 1],
+                [1, 1],
+                [2, 2]
+            ]
+        })
+    });
+
+    static OBJECTS: LazyLock<HashMap<String, ScreenObject>> = LazyLock::new(|| {
+        for obj in DATA.as_object().unwrap().keys() {
+            let path = SAMPLES.path().join(obj);
+            fs::create_dir(path).unwrap();
         }
-    "#;
+        fs::write(
+            SAMPLES.path().parent().unwrap().join("objects_data.json"),
+            to_string_pretty(&*DATA).unwrap()
+        ).unwrap();
+        get_objects(SAMPLES.path().to_path_buf())
+    });
+
     #[test]
-    fn screen_object_deserialization() {
-        let result = serde_json::from_str::<ScreenObject>(DATA);
+    fn get_objects_with_data() {
+        let obj = OBJECTS.get("alpha").unwrap();
+        let coords = obj.coords().unwrap();
 
-        assert!(result.is_ok(), "{}", result.err().unwrap());
-
-        let screen_object = result.unwrap();
-
-        let coords = screen_object.coords.unwrap();
-        let delta = screen_object.delta.unwrap();
-        let path = screen_object.path.unwrap();
-
-        assert_eq!(coords.x, 100);
-        assert_eq!(coords.y, 200);
-        assert_eq!(delta.dir, Dir::Right);
-        assert_eq!(delta.gap, 10);
-        assert_eq!(path, PathBuf::from("sample_path"));
+        assert_eq!(coords, [100, 200]);
     }
 
     #[test]
-    fn delta_test() {
-        let obj: ScreenObject = serde_json::from_str(DATA).unwrap();
-
-        let coords = obj.coords.unwrap();
-        let delta = obj.delta.as_ref().unwrap();
-        assert_eq!(coords.with_delta(delta, 0), coords);
-        assert_eq!(coords.with_delta(delta, 1), Coords { x: coords.x + delta.gap, y: coords.y });
-        assert_eq!(coords.with_delta(delta, 3), Coords { x: coords.x + delta.gap * 3, y: coords.y });
+    fn get_objects_without_data() {
+        let obj = OBJECTS.get("delta").unwrap();
+        assert!(obj.coords().is_none());
     }
 }
