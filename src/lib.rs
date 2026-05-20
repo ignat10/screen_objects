@@ -25,47 +25,8 @@ use crate::utils::rgba_into_rgb;
 mod screen_objects {
     use super::*;
 
-    #[pyfunction]
-    fn get_objects(samples_dir: PathBuf) -> HashMap<String, ScreenObject> {
-        SAMPLES.set(samples_dir.clone()).unwrap();
-
-        let dirs: Vec<PathBuf> = WalkDir::new(&samples_dir)
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .filter(|entry| entry.file_type().is_dir())
-            .map(|entry| entry.into_path())
-            .filter(|dir| {
-                dir.read_dir()
-                    .unwrap()
-                    .all(|entry| entry.unwrap().path().is_file())
-            })
-            .map(|dir| dir.strip_prefix(&samples_dir).unwrap().to_path_buf())
-            .collect();
-
-        let mut lock  = DATA.write().unwrap();
-
-        let mut objects = HashMap::new();
-        for dir in dirs {
-            let name = dir.file_name().unwrap().to_str().unwrap().to_string();
-            if let Some(val) = lock.get_mut(&name) {
-                let first = val.first();
-                objects.insert(
-                    name,
-                    ScreenObject::new(
-                        dir,
-                        if let Some(first) = first && val.iter().all(|x| x == first) {
-                            Some(Coords { x: first[0], y: first[1] })
-                        } else {
-                            None
-                        }
-                    )
-                );
-            }
-        }
-
-
-        HashMap::new()
-    }
+    #[pymodule_export]
+    use get_objects;
 
     #[pymodule_export]
     use ScreenObject;
@@ -100,8 +61,36 @@ static DATA: LazyLock<RwLock<HashMap<String, Vec<[u16; 2]>>>> = LazyLock::new(||
 
 
 
+#[pyfunction]
+fn get_objects(samples_dir: PathBuf) -> HashMap<String, ScreenObject> {
+    let dirs: Vec<PathBuf> = WalkDir::new(&samples_dir)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|entry| entry.file_type().is_dir())
+        .map(|entry| entry.into_path())
+        .filter(|dir| {
+            dir.read_dir()
+                .unwrap()
+                .all(|entry| entry.unwrap().path().is_file())
+        })
+        .collect();
 
+    DATA_PATH.set(samples_dir.parent().unwrap().to_path_buf().join("objects_data.json")).unwrap();
+    let mut lock  = DATA.write().unwrap();
 
+    let mut objects = HashMap::new();
+    for dir in dirs {
+        let name = dir.file_name().unwrap().to_str().unwrap().to_string();
+        if !lock.contains_key(&name) {
+            lock.insert(name.clone(), Vec::new());
+        }
+        objects.insert(
+            name,
+            ScreenObject::new(dir)
+        );
+    }
+    objects
+}
 
 #[pyclass]
 struct ScreenObject {
@@ -131,16 +120,20 @@ impl ScreenObject {
 
         adb::tap(center);
         screen::reset();
+        true
     }
 
-    fn spam_tap(&self, n: u8, interval: f32) {
+    fn spam_tap(&mut self, n: u8, interval: f32) -> bool {
         for _ in 0..n {
-            self.tap(None);
+            if !self.tap() {
+                return false;
+            }
             std::thread::sleep(std::time::Duration::from_secs_f32(interval));
         }
+        true
     }
 
-    fn compare(&mut self) -> Option<bool> {
+    fn exists(&mut self) -> Option<bool> {
         screen::set();
         let guard = screen::SCREENSHOT.read().unwrap();
         let screenshot = guard.as_ref().unwrap();
@@ -151,50 +144,6 @@ impl ScreenObject {
             self.iter_images()
             .any(|img| images_match(&screenshot, &img, coords))
         )
-    }
-
-    fn tap_if_found(&mut self) -> PyResult<bool> {
-        screen::set();
-        let guard = screen::SCREENSHOT.read().unwrap();
-        let screenshot = guard.as_ref().unwrap();
-
-
-        let coords = self.iter_images()
-            .find_map_any(|sample_image| {
-                find_sample(screenshot, &sample_image)
-            }
-        );
-    
-        Ok(if let Some(coords) = coords {
-            let sample = self.iter_images()
-                .find_any(|_| true)
-                .unwrap();
-            let center = Coords {
-                x: (coords.0 + sample.width() / 2) as u16,
-                y: (coords.1 + sample.height() / 2) as u16
-            };
-            Python::attach(|py| py.check_signals())?;
-
-            adb::tap(center);
-            screen::reset();
-            true
-        } else {
-            false
-        })
-    }
-
-    fn find_object(&mut self) -> Option<(usize, usize)> {
-        screen::set();
-        let guard = screen::SCREENSHOT.read().unwrap();
-        let screenshot = guard.as_ref().unwrap();
-
-        let coords = self
-            .iter_images()
-            .find_map_any(|img| {
-                find_sample(screenshot, img)
-            })?;
-        
-        Some(coords)
     }
 
     fn add_sample(&mut self) {
@@ -311,6 +260,24 @@ impl ScreenObject {
                 )
             })
         })
+    }
+
+    fn find_object(&mut self) -> Option<[u16; 2]> {
+        screen::set();
+        let guard = screen::SCREENSHOT.read().unwrap();
+        let screenshot = guard.as_ref().unwrap();
+
+        let coords = self
+            .iter_images()
+            .find_map_any(|img| {
+                find_sample(screenshot, img)
+            })?;
+
+        DATA.write().unwrap().get_mut(&self.name()).unwrap().push(coords);
+        let writer = io::BufWriter::new(fs::File::create(DATA_PATH.get().unwrap()).unwrap());
+        serde_json::to_writer(writer, &*DATA.read().unwrap()).unwrap();
+
+        Some(coords)
     }
 }
 
