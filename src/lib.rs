@@ -36,8 +36,8 @@ mod screen_objects {
     }
 
     #[pyfunction]
-    fn device_config(ip: Option<String>) {
-        adb::device_config(ip);
+    fn device_config(adb: PathBuf, ip: Option<String>) {
+        adb::device_config(adb, ip);
     }
 }
 

@@ -1,18 +1,20 @@
 use std::process::{Command, Output};
 use std::io::stdin;
+use std::path::PathBuf;
 use std::sync::OnceLock;
 
 
 
 const ADB_PORT_LENGTH: usize = 5;
 
-
+static ADB: OnceLock<PathBuf> = OnceLock::new();
 static DEVICE_SERIAL: OnceLock<String> = OnceLock::new();
 
 
 
-pub(super) fn device_config(ip: Option<String>) {
+pub(super) fn device_config(adb: PathBuf, ip: Option<String>) {
     println!("connecting adb device...");
+    ADB.set(adb).unwrap();
 
     let mut serial: Option<String> = scan();
 
@@ -122,7 +124,7 @@ fn device_action(args: &[&str]) -> Output {
 
 
 fn run(args: &[&str]) -> Output {
-    Command::new("adb")
+    Command::new(ADB.get().unwrap())
         .args(args)
         .output()
         .expect("Failed to execute adb command")
