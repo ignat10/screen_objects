@@ -132,17 +132,16 @@ impl ScreenObject {
         true
     }
 
-    fn exists(&mut self) -> Option<bool> {
+    fn exists(&mut self) -> bool {
         screen::set();
         let guard = screen::SCREENSHOT.read().unwrap();
         let screenshot = guard.as_ref().unwrap();
 
-        let coords = self.coords()?;
-
-        Some(
-            self.iter_images()
-            .any(|img| images_match(&screenshot, &img, coords))
-        )
+        if let Some(coords) = self.coords() {
+            self.iter_images().any(|img| images_match(&screenshot, &img, coords))
+        } else {
+            self.find_object().is_some()
+        }
     }
 
     fn add_sample(&mut self) {
