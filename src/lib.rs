@@ -252,10 +252,10 @@ impl ScreenObject {
 
                 Image::new(
                     rgb,
-                    info.width,
-                    info.height,
+                    info.width as usize,
+                    info.height as usize,
                     CHANNELS
-                )
+                ).unwrap()
             })
         })
     }
