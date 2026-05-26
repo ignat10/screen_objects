@@ -103,10 +103,14 @@ impl ScreenObject {
     fn tap(&mut self) -> bool {
         let coords: [u16; 2] = if let Some(data_coords) = self.coords() {
             data_coords
-        } else if let Some(found_coords) = self.find_object() {
-            found_coords
         } else {
-            return false;
+            screen::set();
+            
+            if let Some(found_coords) = self.find_object() {
+                found_coords
+            } else {
+                return false;
+            }
         };
 
         let sample = self.iter_images()
@@ -261,7 +265,6 @@ impl ScreenObject {
     }
 
     fn find_object(&mut self) -> Option<[u16; 2]> {
-        screen::set();
         let guard = screen::SCREENSHOT.read().unwrap();
         let screenshot = guard.as_ref().unwrap();
 
@@ -273,7 +276,7 @@ impl ScreenObject {
 
         DATA.write().unwrap().get_mut(&self.name()).unwrap().push(coords);
         let writer = io::BufWriter::new(fs::File::create(DATA_PATH.get().unwrap()).unwrap());
-        serde_json::to_writer(writer, &*DATA.read().unwrap()).unwrap();
+        serde_json::to_writer_pretty(writer, &*DATA.read().unwrap()).unwrap();
 
         Some(coords)
     }
