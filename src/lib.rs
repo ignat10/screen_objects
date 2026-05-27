@@ -121,19 +121,23 @@ impl ScreenObject {
             adb::tap(center);
             screen::reset();
             true
-        } else {
-            false
-        }
+        } else { false }
     }
 
     fn spam_tap(&mut self, n: u8, interval: f32) -> bool {
-        for _ in 0..n {
-            if !self.tap() {
-                return false;
+        if let Some(coords) = self.find_object() {
+            let image = &self.image;
+            let center: [u16; 2] = [
+                coords[0] + image.width() as u16 / 2,
+                coords[1] + image.height() as u16 / 2
+            ];
+            for _ in 0..n {
+                adb::tap(center);
+                std::thread::sleep(std::time::Duration::from_secs_f32(interval));
             }
-            std::thread::sleep(std::time::Duration::from_secs_f32(interval));
-        }
-        true
+            screen::reset();
+            true
+        } else { false }
     }
 
     fn exists(&mut self) -> bool {
