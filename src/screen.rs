@@ -4,7 +4,7 @@ use pixen::Image;
 use crate::adb;
 use crate::utils::rgba_into_rgb;
 
-pub(crate) const CHANNELS: usize = 3;
+pub(crate) const RGB_CHANNELS: usize = 3;
 
 pub(super) static SCREENSHOT: RwLock<Option<Image>> =  RwLock::new(None);
 
@@ -21,7 +21,7 @@ pub(super) fn set() {
             rgba_into_rgb(rgba_bytes),
             w as usize,
             h as usize,
-            CHANNELS
+            RGB_CHANNELS
         ).unwrap();
 
         *guard = Some(image);
