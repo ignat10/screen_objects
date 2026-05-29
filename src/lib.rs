@@ -41,6 +41,7 @@ mod screen_objects {
     #[pyfunction]
     fn back() {
         adb::back();
+        screen::reset();
     }
 }
 
