@@ -162,7 +162,7 @@ impl ScreenObject {
                 match img {
                     image::LoadResult::ImageU8(img) => {
                         Image::new(
-                            if img.width != RGB_CHANNELS {
+                            if img.depth != RGB_CHANNELS {
                                 rgba_into_rgb(img.data)
                             } else {
                                 img.data
