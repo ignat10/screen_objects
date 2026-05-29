@@ -67,6 +67,11 @@ pub(crate) fn dimensions() -> (u32, u32) {
 }
 
 
+pub(crate) fn back() {
+    device_action(&["shell", "input", "keyevent", "4"]);
+}
+
+
 fn scan() -> Option<String> {
     let raw_output = run(&["devices"]).stdout;
     let text_output = String::from_utf8_lossy(&raw_output).into_owned();

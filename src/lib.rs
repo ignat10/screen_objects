@@ -15,8 +15,8 @@ pub mod adb;
 mod screen;
 pub mod utils;
 
-use crate::screen::RGB_CHANNELS;
-use crate::utils::rgba_into_rgb;
+use screen::RGB_CHANNELS;
+use utils::rgba_into_rgb;
 
 #[pymodule]
 mod screen_objects {
@@ -36,6 +36,11 @@ mod screen_objects {
     #[pyfunction]
     fn device_config(adb: PathBuf, ip: Option<String>) {
         adb::device_config(adb, ip);
+    }
+    
+    #[pyfunction]
+    fn back() {
+        adb::back();
     }
 }
 
