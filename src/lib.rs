@@ -1,22 +1,23 @@
 #![feature(vec_into_chunks)]
+#![feature(mapped_lock_guards)]
 
 use std::collections::HashMap;
-use std::{fs, io};
+use std::fs;
 use std::path::PathBuf;
-use std::sync::{OnceLock, LazyLock, RwLock};
+use std::sync::{LazyLock, OnceLock, RwLock};
 
+use pixen::Image;
 use pyo3::prelude::*;
-use walkdir::WalkDir;
 use serde_json::from_reader;
 use stb_image::image;
-use pixen::{Image, images_match, find_sample};
+use walkdir::WalkDir;
 
 pub mod adb;
 mod screen;
 pub mod utils;
 
 use screen::RGB_CHANNELS;
-use utils::rgba_into_rgb;
+use utils::*;
 
 #[pymodule]
 mod screen_objects {
@@ -116,38 +117,46 @@ struct ScreenObject {
 
 #[pymethods]
 impl ScreenObject {
+    fn exists(&self) -> bool {
+        self.find_any().is_some()
+    }
+
     fn tap(&self) -> bool {
         if let Some(coords) = self.find_object() {
-            let sample = &self.image;
-            let center: [u16; 2] = [
-                coords[0] + sample.width() as u16 / 2,
-                coords[1] + sample.height() as u16 / 2
-            ];
+            let center = center_coords(coords, &self.image);
 
             adb::tap(center);
             screen::reset();
             true
-        } else { false }
+        } else {
+            false
+        }
     }
 
-    fn spam_tap(&mut self, n: u8, interval: f32) -> bool {
+    fn tap_nth(&self, n: usize) -> bool {
+        if let Some(coords) = self.find_nth(n) {
+            let center = center_coords(coords, &self.image);
+            adb::tap(center);
+            screen::reset();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn spam_tap(&self, n: u8, interval: f32) -> bool {
         if let Some(coords) = self.find_object() {
             let image = &self.image;
-            let center: [u16; 2] = [
-                coords[0] + image.width() as u16 / 2,
-                coords[1] + image.height() as u16 / 2
-            ];
+            let center = center_coords(coords, image);
             for _ in 0..n {
                 adb::tap(center);
                 std::thread::sleep(std::time::Duration::from_secs_f32(interval));
             }
             screen::reset();
             true
-        } else { false }
-    }
-
-    fn exists(&mut self) -> bool {
-        self.find_object().is_some()
+        } else {
+            false
+        }
     }
 }
 
@@ -180,20 +189,38 @@ impl ScreenObject {
     }
 
     fn find_object(&self) -> Option<[u16; 2]> {
-        screen::set();
-        let guard = screen::SCREENSHOT.read().unwrap();
-        let screenshot = guard.as_ref().unwrap();
-        let image = &self.image;
+        let screenshot= screen::get();
 
         let coords = self.coords
-            .filter(|&c| images_match(screenshot, image, c))
-            .or_else(|| find_sample(screenshot, &self.image))
+            .filter(|&c| pixen::images_match(&*screenshot, &self.image, c))
+            .or_else(|| pixen::find_best(&*screenshot, &self.image))
             ?;
 
-        DATA.write().unwrap().get_mut(&self.name).unwrap().push(coords);
-        let writer = io::BufWriter::new(fs::File::create(DATA_PATH.get().unwrap()).unwrap());
-        serde_json::to_writer_pretty(writer, &*DATA.read().unwrap()).unwrap();
+        add_coords(&self.name, coords);
+        Some(coords)
+    }
 
+    fn find_any(&self) -> Option<[u16; 2]> {
+        let screenshot = screen::get();
+
+        let coords = self.coords
+            .filter(|&c| pixen::images_match(&*screenshot, &self.image, c))
+            .or_else(|| pixen::find_first(&*screenshot, &self.image))
+            ?;
+
+        add_coords(&self.name, coords);
+        Some(coords)
+    }
+
+    fn find_nth(&self, n: usize) -> Option<[u16; 2]> {
+        let screenshot = screen::get();
+
+        let coords = self.coords
+            .filter(|&c| pixen::images_match(&*screenshot, &self.image, c))
+            .or_else(|| pixen::find_nth(&*screenshot, &self.image, n))
+            ?;
+
+        add_coords(&self.name, coords);
         Some(coords)
     }
 }
@@ -203,7 +230,7 @@ impl ScreenObject {
 mod tests {
     use super::*;
 
-    use serde_json::{ json, Value, to_string_pretty };
+    use serde_json::{json, to_string_pretty, Value};
     use tempfile::{tempdir, TempDir};
 
 

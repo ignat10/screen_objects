@@ -1,3 +1,8 @@
+use std::{fs, io};
+use pixen::Image;
+use crate::{DATA, DATA_PATH};
+
+
 pub(crate) fn rgba_into_rgb(rgba: Vec<u8>) -> Vec<u8> {
     assert_eq!(rgba.len() % 4, 0);
     let mut rgb = Vec::with_capacity(rgba.len() / 4 * 3);
@@ -8,4 +13,18 @@ pub(crate) fn rgba_into_rgb(rgba: Vec<u8>) -> Vec<u8> {
         rgb.push(b);
     }
     rgb
+}
+
+
+pub(crate) fn add_coords(key: &str, val: [u16; 2]) {
+    DATA.write().unwrap().get_mut(key).unwrap().push(val);
+    let writer = io::BufWriter::new(fs::File::create(DATA_PATH.get().unwrap()).unwrap());
+    serde_json::to_writer_pretty(writer, &*DATA.read().unwrap()).unwrap();
+}
+
+pub(super) fn center_coords(corner: [u16; 2], img: &Image) -> [u16; 2] {
+    [
+        corner[0] + img.width() as u16 / 2,
+        corner[1] + img.height() as u16 / 2
+    ]
 }
