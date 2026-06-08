@@ -1,7 +1,7 @@
 use std::process::{Command, Output};
 use std::io::stdin;
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::{LazyLock, OnceLock};
 
 
 
@@ -38,6 +38,23 @@ pub(super) fn device_config(adb: PathBuf, ip: Option<String>) {
 }
 
 
+pub(crate) static DIMENTIONS: LazyLock<[u16; 2]> = LazyLock::new(|| {
+    let output = device_action(&["shell", "wm", "size"]).stdout;
+    let size_str = String::from_utf8_lossy(&output);
+
+    let size_part = size_str
+        .split_whitespace()
+        .last()
+        .unwrap();
+
+    size_part.split('x')
+        .map(|s| s.parse::<u16>().unwrap())
+        .collect::<Vec<u16>>()
+        .try_into()
+        .unwrap()
+});
+
+
 pub(super) fn tap(coords: [u16; 2]) {
     device_action(&["shell", "input", "tap", &coords[0].to_string(), &coords[1].to_string()]);
 }
@@ -47,23 +64,6 @@ pub(crate) fn screencap() -> Vec<u8> {
     let mut v = device_action(&["exec-out", "screencap"]).stdout;
     v.drain(..16);
     v
-}
-
-
-pub(crate) fn dimensions() -> (u32, u32) {
-    let output = device_action(&["shell", "wm", "size"]).stdout;
-    let size_str = String::from_utf8_lossy(&output);
-
-    let size_part = size_str
-        .split_whitespace()
-        .last()
-        .unwrap();
-
-    let size = size_part.split('x')
-        .map(|s| s.parse::<u32>().unwrap())
-        .collect::<Vec<u32>>();
-
-    (size[0], size[1])
 }
 
 

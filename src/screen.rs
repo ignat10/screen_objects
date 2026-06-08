@@ -23,7 +23,7 @@ fn set() {
     let mut guard = SCREENSHOT.write().unwrap();
     
     if guard.is_none() {
-        let (w, h) = adb::dimensions();
+        let [w, h] = *adb::DIMENTIONS;
         let rgba_bytes = adb::screencap();
 
         let image = Image::new(
