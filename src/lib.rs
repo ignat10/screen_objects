@@ -215,10 +215,7 @@ impl ScreenObject {
     fn find_nth(&self, n: usize) -> Option<[u16; 2]> {
         let screenshot = screen::get();
 
-        let coords = self.coords
-            .filter(|&c| pixen::images_match(&*screenshot, &self.image, c))
-            .or_else(|| pixen::find_nth(&*screenshot, &self.image, n))
-            ?;
+        let coords = pixen::find_nth(&*screenshot, &self.image, n)?;
 
         add_coords(&self.name, coords);
         Some(coords)
