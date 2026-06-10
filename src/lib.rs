@@ -38,14 +38,13 @@ mod screen_objects {
     fn device_config(adb: PathBuf, ip: Option<String>) {
         adb::device_config(adb, ip);
     }
-    
+
     #[pyfunction]
     fn back() {
         adb::back();
         screen::reset();
     }
 }
-
 
 static DATA_PATH: OnceLock<PathBuf> = OnceLock::new();
 static DATA: LazyLock<RwLock<HashMap<String, Vec<[u16; 2]>>>> = LazyLock::new(|| {
@@ -57,13 +56,10 @@ static DATA: LazyLock<RwLock<HashMap<String, Vec<[u16; 2]>>>> = LazyLock::new(||
 
     let file = fs::File::open(&path).expect("Failed to open file");
 
-    let map: HashMap<String, Vec<[u16; 2]>> =
-        from_reader(file).expect("Failed to parse JSON");
+    let map: HashMap<String, Vec<[u16; 2]>> = from_reader(file).expect("Failed to parse JSON");
 
     RwLock::new(map)
 });
-
-
 
 #[pyfunction]
 fn get_objects(samples_dir: PathBuf) -> HashMap<String, ScreenObject> {
@@ -74,12 +70,24 @@ fn get_objects(samples_dir: PathBuf) -> HashMap<String, ScreenObject> {
         .map(|entry| entry.into_path())
         .collect();
 
-    DATA_PATH.set(samples_dir.parent().unwrap().to_path_buf().join("objects_data.json")).unwrap();
-    let mut lock  = DATA.write().unwrap();
+    DATA_PATH
+        .set(
+            samples_dir
+                .parent()
+                .unwrap()
+                .to_path_buf()
+                .join("objects_data.json"),
+        )
+        .unwrap();
+    let mut lock = DATA.write().unwrap();
 
     let mut objects = HashMap::new();
     for file in files {
-        let name = file.file_stem().and_then(|n| n.to_str()).unwrap().to_string();
+        let name = file
+            .file_stem()
+            .and_then(|n| n.to_str())
+            .unwrap()
+            .to_string();
 
         if !lock.contains_key(&name) {
             lock.insert(name.clone(), Vec::new());
@@ -93,16 +101,9 @@ fn get_objects(samples_dir: PathBuf) -> HashMap<String, ScreenObject> {
             None
         };
 
-        if !lock.contains_key(&name) {
-        }
+        if !lock.contains_key(&name) {}
 
-        objects.insert(
-            name,
-            ScreenObject::new(
-                file,
-                coords
-            )
-        );
+        objects.insert(name, ScreenObject::new(file, coords));
     }
     objects
 }
@@ -111,14 +112,13 @@ fn get_objects(samples_dir: PathBuf) -> HashMap<String, ScreenObject> {
 struct ScreenObject {
     name: String,
     image: LazyLock<Image, Box<dyn FnOnce() -> Image + Send + Sync>>,
-    coords: Option<[u16; 2]>
+    coords: Option<[u16; 2]>,
 }
-
 
 #[pymethods]
 impl ScreenObject {
     fn exists(&self) -> bool {
-        self.find_any().is_some()
+        self.is_on_screen()
     }
 
     fn tap(&self) -> bool {
@@ -160,56 +160,66 @@ impl ScreenObject {
     }
 }
 
-
 impl ScreenObject {
     fn new(path: PathBuf, coords: Option<[u16; 2]>) -> Self {
         Self {
-            name: path.file_stem().and_then(|n| n.to_str()).unwrap().to_string(),
+            name: path
+                .file_stem()
+                .and_then(|n| n.to_str())
+                .unwrap()
+                .to_string(),
             coords,
             image: LazyLock::new(Box::new(move || {
                 let img = image::load(&path);
                 match img {
-                    image::LoadResult::ImageU8(img) => {
-                        Image::new(
-                            if img.depth != RGB_CHANNELS {
-                                rgba_into_rgb(img.data)
-                            } else {
-                                img.data
-                            },
-                            img.width,
-                            img.height,
-                            RGB_CHANNELS
-                        ).unwrap()
-                    },
-                    image::LoadResult::ImageF32(_) => panic!("Unknown image format: {}", path.display()),
+                    image::LoadResult::ImageU8(img) => Image::new(
+                        if img.depth != RGB_CHANNELS {
+                            rgba_into_rgb(img.data)
+                        } else {
+                            img.data
+                        },
+                        img.width,
+                        img.height,
+                        RGB_CHANNELS,
+                    )
+                    .unwrap(),
+                    image::LoadResult::ImageF32(_) => {
+                        panic!("Unknown image format: {}", path.display())
+                    }
                     image::LoadResult::Error(e) => panic!("Failed to load image: {}", e),
                 }
-            }))
+            })),
         }
     }
 
     fn find_object(&self) -> Option<[u16; 2]> {
-        let screenshot= screen::get();
+        let screenshot = screen::get();
 
-        let coords = self.coords
-            .filter(|&c| pixen::images_match(&*screenshot, &self.image, c))
-            .or_else(|| pixen::find_best(&*screenshot, &self.image))
-            ?;
+        let image = &self.image;
+        let coords = if let Some(coords) = self.coords {
+            pixen::find_best_with_hint(&*screenshot, image, coords)
+        } else {
+            pixen::find_best(&*screenshot, image)
+        }?;
 
         add_coords(&self.name, coords);
         Some(coords)
     }
 
-    fn find_any(&self) -> Option<[u16; 2]> {
+    fn is_on_screen(&self) -> bool {
         let screenshot = screen::get();
+        let image = &self.image;
 
-        let coords = self.coords
-            .filter(|&c| pixen::images_match(&*screenshot, &self.image, c))
-            .or_else(|| pixen::find_first(&*screenshot, &self.image))
-            ?;
-
-        add_coords(&self.name, coords);
-        Some(coords)
+        if let Some(coords) = self.coords {
+            if pixen::matches_with_hint(&*screenshot, &*image, coords) {
+                add_coords(&self.name, coords);
+                true
+            } else {
+                false
+            }
+        } else {
+            pixen::matches(&*screenshot, &*image)
+        }
     }
 
     fn find_nth(&self, n: usize) -> Option<[u16; 2]> {
@@ -222,14 +232,12 @@ impl ScreenObject {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    use serde_json::{json, to_string_pretty, Value};
-    use tempfile::{tempdir, TempDir};
-
+    use serde_json::{Value, json, to_string_pretty};
+    use tempfile::{TempDir, tempdir};
 
     static SAMPLES: LazyLock<TempDir> = LazyLock::new(|| tempdir().unwrap());
     static DATA: LazyLock<Value> = LazyLock::new(|| {
@@ -258,8 +266,9 @@ mod tests {
         }
         fs::write(
             SAMPLES.path().parent().unwrap().join("objects_data.json"),
-            to_string_pretty(&*DATA).unwrap()
-        ).unwrap();
+            to_string_pretty(&*DATA).unwrap(),
+        )
+        .unwrap();
         get_objects(SAMPLES.path().to_path_buf())
     });
 

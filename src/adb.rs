@@ -1,16 +1,12 @@
-use std::process::{Command, Output};
 use std::io::stdin;
 use std::path::PathBuf;
+use std::process::{Command, Output};
 use std::sync::{LazyLock, OnceLock};
-
-
 
 const ADB_PORT_LENGTH: usize = 5;
 
 static ADB: OnceLock<PathBuf> = OnceLock::new();
 static DEVICE_SERIAL: OnceLock<String> = OnceLock::new();
-
-
 
 pub(super) fn device_config(adb: PathBuf, ip: Option<String>) {
     println!("connecting adb device...");
@@ -37,28 +33,29 @@ pub(super) fn device_config(adb: PathBuf, ip: Option<String>) {
     println!("device connected");
 }
 
-
 pub(crate) static DIMENTIONS: LazyLock<[u16; 2]> = LazyLock::new(|| {
     let output = device_action(&["shell", "wm", "size"]).stdout;
     let size_str = String::from_utf8_lossy(&output);
 
-    let size_part = size_str
-        .split_whitespace()
-        .last()
-        .unwrap();
+    let size_part = size_str.split_whitespace().last().unwrap();
 
-    size_part.split('x')
+    size_part
+        .split('x')
         .map(|s| s.parse::<u16>().unwrap())
         .collect::<Vec<u16>>()
         .try_into()
         .unwrap()
 });
 
-
 pub(super) fn tap(coords: [u16; 2]) {
-    device_action(&["shell", "input", "tap", &coords[0].to_string(), &coords[1].to_string()]);
+    device_action(&[
+        "shell",
+        "input",
+        "tap",
+        &coords[0].to_string(),
+        &coords[1].to_string(),
+    ]);
 }
-
 
 pub(crate) fn screencap() -> Vec<u8> {
     let mut v = device_action(&["exec-out", "screencap"]).stdout;
@@ -66,11 +63,9 @@ pub(crate) fn screencap() -> Vec<u8> {
     v
 }
 
-
 pub(crate) fn back() {
     device_action(&["shell", "input", "keyevent", "4"]);
 }
-
 
 fn scan() -> Option<String> {
     let raw_output = run(&["devices"]).stdout;
@@ -80,7 +75,7 @@ fn scan() -> Option<String> {
         if line.is_empty() {
             return None;
         }
-        
+
         let mut serial_status = line.split_whitespace();
 
         let serial = serial_status.next().unwrap();
@@ -94,14 +89,11 @@ fn scan() -> Option<String> {
     None
 }
 
-
 fn input_port() -> Option<String> {
     println!("Turn on USB debugging or enter wireless debugging port: ");
     let mut input = String::new();
 
-    stdin()
-        .read_line(&mut input)
-        .expect("Failed to read line");
+    stdin().read_line(&mut input).expect("Failed to read line");
 
     let port = input.trim();
 
@@ -112,7 +104,6 @@ fn input_port() -> Option<String> {
     }
 }
 
-
 fn connect(port: &str) -> bool {
     let raw_output = run(&["connect", port]).stdout;
     let text_output = String::from_utf8_lossy(&raw_output).into_owned();
@@ -120,13 +111,13 @@ fn connect(port: &str) -> bool {
     text_output.contains("connected to")
 }
 
-
 fn device_action(args: &[&str]) -> Output {
-    let serial = DEVICE_SERIAL.get().expect("serial not set. call device_config() before using actions.");
+    let serial = DEVICE_SERIAL
+        .get()
+        .expect("serial not set. call device_config() before using actions.");
     let args = [&["-s", serial], args].concat();
     run(&args)
 }
-
 
 fn run(args: &[&str]) -> Output {
     Command::new(ADB.get().unwrap())
