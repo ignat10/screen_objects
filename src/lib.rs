@@ -6,7 +6,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::{LazyLock, OnceLock, RwLock};
 
-use pixen::Image;
+use pixen::{Image, matches, matches_with_hint, find_best, find_best_with_hint, find_nth};
 use pyo3::prelude::*;
 use serde_json::from_reader;
 use stb_image::image;
@@ -44,6 +44,9 @@ mod screen_objects {
         adb::back();
         screen::reset();
     }
+
+    #[pymodule_export]
+    use adb::screenshot;
 }
 
 static DATA_PATH: OnceLock<PathBuf> = OnceLock::new();
@@ -197,9 +200,9 @@ impl ScreenObject {
 
         let image = &self.image;
         let coords = if let Some(coords) = self.coords {
-            pixen::find_best_with_hint(&*screenshot, image, coords)
+            find_best_with_hint(&*screenshot, image, coords)
         } else {
-            pixen::find_best(&*screenshot, image)
+            find_best(&*screenshot, image)
         }?;
 
         add_coords(&self.name, coords);
@@ -211,21 +214,20 @@ impl ScreenObject {
         let image = &self.image;
 
         if let Some(coords) = self.coords {
-            if pixen::matches_with_hint(&*screenshot, &*image, coords) {
+            let r = matches_with_hint(&*screenshot, &*image, coords);
+            if r {
                 add_coords(&self.name, coords);
-                true
-            } else {
-                false
             }
+            r
         } else {
-            pixen::matches(&*screenshot, &*image)
+            matches(&*screenshot, &*image)
         }
     }
 
     fn find_nth(&self, n: usize) -> Option<[u16; 2]> {
         let screenshot = screen::get();
 
-        let coords = pixen::find_nth(&*screenshot, &self.image, n)?;
+        let coords = find_nth(&*screenshot, &self.image, n)?;
 
         add_coords(&self.name, coords);
         Some(coords)
