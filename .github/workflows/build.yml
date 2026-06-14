@@ -2,8 +2,8 @@ name: Build Wheels (Python 3.14 + nightly Rust)
 
 on:
   push:
-    branches:
-      - main
+    tags:
+      - "v*"
 
 permissions:
   contents: write
