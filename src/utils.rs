@@ -14,10 +14,14 @@ pub(crate) fn rgba_into_rgb(rgba: Vec<u8>) -> Vec<u8> {
     rgb
 }
 
-pub(crate) fn add_coords(key: &str, val: [u16; 2]) {
-    DATA.write().unwrap().get_mut(key).unwrap().push(val);
-    let writer = io::BufWriter::new(fs::File::create(DATA_PATH.get().unwrap()).unwrap());
-    serde_json::to_writer_pretty(writer, &*DATA.read().unwrap()).unwrap();
+pub(super) fn add_coords(key: &str, val: [u16; 2]) -> Result<(), Box<dyn std::error::Error>> {
+    DATA.write()?
+        .get_mut(key)
+        .unwrap()
+        .push(val);
+    let writer = io::BufWriter::new(fs::File::create(DATA_PATH.get().unwrap())?);
+    serde_json::to_writer_pretty(writer, &*DATA.read()?)?;
+    Ok(())
 }
 
 pub(super) fn center_coords(corner: [u16; 2], img: &Image) -> [u16; 2] {

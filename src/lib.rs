@@ -2,11 +2,13 @@
 #![feature(mapped_lock_guards)]
 
 use std::collections::HashMap;
+use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{LazyLock, OnceLock, RwLock};
 
 use pixen::Image;
+use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use serde_json::from_reader;
 use stb_image::image;
@@ -62,10 +64,12 @@ static DATA: LazyLock<RwLock<HashMap<String, Vec<[u16; 2]>>>> = LazyLock::new(||
 });
 
 #[pyfunction]
-fn get_objects(samples_dir: PathBuf) -> HashMap<String, ScreenObject> {
+fn get_objects(samples_dir: PathBuf) -> PyResult<HashMap<String, ScreenObject>> {
     let files: Vec<PathBuf> = WalkDir::new(&samples_dir)
         .into_iter()
-        .filter_map(|e| e.ok())
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))?
+        .into_iter()
         .filter(|entry| entry.file_type().is_file())
         .map(|entry| entry.into_path())
         .collect();
@@ -78,8 +82,9 @@ fn get_objects(samples_dir: PathBuf) -> HashMap<String, ScreenObject> {
                 .to_path_buf()
                 .join("objects_data.json"),
         )
-        .unwrap();
-    let mut lock = DATA.write().unwrap();
+        .map_err(|e| PyRuntimeError::new_err(e.to_string_lossy().into_owned()))?;
+    let mut lock = DATA.write()
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
 
     let mut objects = HashMap::new();
     for file in files {
@@ -92,20 +97,19 @@ fn get_objects(samples_dir: PathBuf) -> HashMap<String, ScreenObject> {
         if !lock.contains_key(&name) {
             lock.insert(name.clone(), Vec::new());
         };
-        let coords_vec = lock.get(&name).unwrap();
+        let coords_vec = lock.get_mut(&name).unwrap();
         let coords = if coords_vec.len() < 5 {
             None
         } else if coords_vec.windows(2).all(|w| w[0] == w[1]) {
             coords_vec.first().cloned()
         } else {
+            coords_vec.clear();
             None
         };
 
-        if !lock.contains_key(&name) {}
-
         objects.insert(name, ScreenObject::new(file, coords));
     }
-    objects
+    Ok(objects)
 }
 
 #[pyclass]
@@ -117,46 +121,52 @@ struct ScreenObject {
 
 #[pymethods]
 impl ScreenObject {
-    fn exists(&self) -> bool {
-        self.is_on_screen()
+    fn exists(&self) -> PyResult<bool> {
+        self.is_on_screen().map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }
 
-    fn tap(&self) -> bool {
-        if let Some(coords) = self.find_object() {
-            let center = center_coords(coords, &self.image);
-
-            adb::tap(center);
-            screen::reset();
-            true
-        } else {
-            false
-        }
-    }
-
-    fn tap_nth(&self, n: usize) -> bool {
-        if let Some(coords) = self.find_nth(n) {
-            let center = center_coords(coords, &self.image);
-            adb::tap(center);
-            screen::reset();
-            true
-        } else {
-            false
-        }
-    }
-
-    fn spam_tap(&self, n: u8, interval: f32) -> bool {
-        if let Some(coords) = self.find_object() {
-            let image = &self.image;
-            let center = center_coords(coords, image);
-            for _ in 0..n {
+    fn tap(&self) -> PyResult<bool> {
+        Ok(
+            if let Some(coords) = self.find_object().map_err(|e| PyRuntimeError::new_err(e.to_string()))? {
+                let center = center_coords(coords, &self.image);
+                Python::attach(|py| py.check_signals())?;
                 adb::tap(center);
-                std::thread::sleep(std::time::Duration::from_secs_f32(interval));
+                screen::reset();
+                true
+            } else {
+                false
             }
+        )
+    }
+
+    fn tap_nth(&self, n: usize) -> PyResult<bool> {
+        Ok(if let Some(coords) = self.find_nth(n).map_err(|e| PyRuntimeError::new_err(e.to_string()))? {
+            let center = center_coords(coords, &self.image);
+            Python::attach(|py| py.check_signals())?;
+            adb::tap(center);
             screen::reset();
             true
         } else {
             false
-        }
+        })
+    }
+
+    fn spam_tap(&self, n: u8, interval: f32) -> PyResult<bool> {
+        Ok(
+            if let Some(coords) = self.find_object().map_err(|e| PyRuntimeError::new_err(e.to_string()))? {
+                let image = &self.image;
+                let center = center_coords(coords, image);
+                for _ in 0..n {
+                    adb::tap(center);
+                    std::thread::sleep(std::time::Duration::from_secs_f32(interval));
+                    Python::attach(|py| py.check_signals())?;
+                }
+                screen::reset();
+                true
+            } else {
+                false
+            }
+        )
     }
 }
 
@@ -192,7 +202,7 @@ impl ScreenObject {
         }
     }
 
-    fn find_object(&self) -> Option<[u16; 2]> {
+    fn find_object(&self) -> Result<Option<[u16; 2]>, Box<dyn Error>> {
         let screenshot = screen::get();
 
         let image = &self.image;
@@ -200,35 +210,43 @@ impl ScreenObject {
             pixen::find_best_with_hint(&*screenshot, image, coords)
         } else {
             pixen::find_best(&*screenshot, image)
-        }?;
+        };
 
-        add_coords(&self.name, coords);
-        Some(coords)
+        if let Some(coords) = coords {
+            add_coords(&self.name, coords)?;
+            Ok(Some(coords))
+        } else {
+            Ok(None)
+        }
     }
 
-    fn is_on_screen(&self) -> bool {
+    fn is_on_screen(&self) -> Result<bool, Box<dyn Error>> {
         let screenshot = screen::get();
         let image = &self.image;
 
-        if let Some(coords) = self.coords {
+        Ok(if let Some(coords) = self.coords {
             if pixen::matches_with_hint(&*screenshot, &*image, coords) {
-                add_coords(&self.name, coords);
+                add_coords(&self.name, coords)?;
                 true
             } else {
                 false
             }
         } else {
             pixen::matches(&*screenshot, &*image)
-        }
+        })
     }
 
-    fn find_nth(&self, n: usize) -> Option<[u16; 2]> {
+    fn find_nth(&self, n: usize) -> Result<Option<[u16; 2]>, Box<dyn Error>> {
         let screenshot = screen::get();
 
-        let coords = pixen::find_nth(&*screenshot, &self.image, n)?;
+        let coords = pixen::find_nth(&*screenshot, &self.image, n);
 
-        add_coords(&self.name, coords);
-        Some(coords)
+        if let Some(coords) = coords {
+            add_coords(&self.name, coords)?;
+            Ok(Some(coords))
+        } else {
+            Ok(None)
+        }
     }
 }
 
@@ -269,7 +287,7 @@ mod tests {
             to_string_pretty(&*DATA).unwrap(),
         )
         .unwrap();
-        get_objects(SAMPLES.path().to_path_buf())
+        get_objects(SAMPLES.path().to_path_buf()).unwrap()
     });
 
     #[test]
