@@ -1,7 +1,10 @@
-use std::io::stdin;
+use std::io::{stdin, Write};
+use std::fs::File;
 use std::path::PathBuf;
 use std::process::{Command, Output};
 use std::sync::{LazyLock, OnceLock};
+
+use pyo3::prelude::{PyResult, pyfunction};
 
 const ADB_PORT_LENGTH: usize = 5;
 
@@ -55,6 +58,15 @@ pub(super) fn tap(coords: [u16; 2]) {
         &coords[0].to_string(),
         &coords[1].to_string(),
     ]);
+}
+
+#[pyfunction]
+pub(super) fn screenshot() -> PyResult<()> {
+    let mut file = File::create("screen.png")?;
+    let out =device_action(&["exec-out", "screencap", "-p"])
+        .stdout;
+    file.write_all(&out)?;
+    Ok(())
 }
 
 pub(crate) fn screencap() -> Vec<u8> {
