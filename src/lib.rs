@@ -222,11 +222,10 @@ impl ScreenObject {
     }
 
     fn find_object(&self) -> Result<Option<[u16; 2]>, Box<dyn Error>> {
-        let screenshot = screen::get();
-        let image = &self.image;
-
         let coords = self.matches_at_coords()?
             .or_else(|| {
+                let screenshot = screen::get();
+                let image = &self.image;
                 let e = pixen::find_exact(&*screenshot, image);
                 if self.exact {
                     e
