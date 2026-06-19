@@ -15,8 +15,16 @@ pub(crate) fn rgba_into_rgb(rgba: Vec<u8>) -> Vec<u8> {
 }
 
 pub(super) fn add_coords(key: &str, val: [u16; 2]) -> Result<(), Box<dyn std::error::Error>> {
-    DATA.write()?.get_mut(key).unwrap().insert(val);
+    DATA.write()?.get_mut(key).unwrap().0.insert(val);
+    save_data()
+}
 
+pub(super) fn set_exact(key: &str) -> Result<(), Box<dyn std::error::Error>> {
+    DATA.write()?.get_mut(key).unwrap().1 = true;
+    save_data()
+}
+
+fn save_data() -> Result<(), Box<dyn std::error::Error>> {
     let writer = io::BufWriter::new(fs::File::create(DATA_PATH.get().unwrap())?);
     serde_json::to_writer_pretty(writer, &*DATA.read()?)?;
     Ok(())

@@ -52,16 +52,16 @@ mod screen_objects {
 }
 
 static DATA_PATH: OnceLock<PathBuf> = OnceLock::new();
-static DATA: LazyLock<RwLock<HashMap<String, HashSet<[u16; 2]>>>> = LazyLock::new(|| {
+static DATA: LazyLock<RwLock<HashMap<String, (HashSet<[u16; 2]>, bool)>>> = LazyLock::new(|| {
     let path = DATA_PATH.get().expect("DATA_PATH must be initialized");
 
     if !path.exists() {
-        fs::write(&path, "{}").expect("Failed to write empty file");
+        fs::write(&path, "{}").expect(format!("Failed to write empty file {}", path.display()).as_str());
     }
 
-    let file = fs::File::open(&path).expect("Failed to open file");
+    let file = fs::File::open(&path).expect(format!("Failed to open file {}", path.display()).as_str());
 
-    let map = from_reader(file).expect("Failed to parse JSON");
+    let map = from_reader(file).expect(format!("Failed to parse JSON {}", path.display()).as_str());
 
     RwLock::new(map)
 });
@@ -99,11 +99,11 @@ fn get_objects(samples_dir: PathBuf) -> PyResult<HashMap<String, ScreenObject>> 
             .to_string();
 
         if !lock.contains_key(&name) {
-            lock.insert(name.clone(), HashSet::new());
+            lock.insert(name.clone(), (HashSet::new(), false));
         };
-        let coords = lock.get(&name).unwrap().clone();
+        let (coords, exact) = lock.get(&name).unwrap().clone();
 
-        objects.insert(name, ScreenObject::new(file, coords));
+        objects.insert(name, ScreenObject::new(file, coords, exact));
     }
     Ok(objects)
 }
@@ -113,6 +113,7 @@ struct ScreenObject {
     name: String,
     image: LazyLock<Image, Box<dyn FnOnce() -> Image + Send + Sync>>,
     coords: HashSet<[u16; 2]>,
+    exact: bool,
 }
 
 #[pymethods]
@@ -188,7 +189,7 @@ impl ScreenObject {
 }
 
 impl ScreenObject {
-    fn new(path: PathBuf, coords: HashSet<[u16; 2]>) -> Self {
+    fn new(path: PathBuf, coords: HashSet<[u16; 2]>, exact: bool) -> Self {
         Self {
             name: path
                 .file_stem()
@@ -216,19 +217,24 @@ impl ScreenObject {
                     image::LoadResult::Error(e) => panic!("Failed to load image: {}", e),
                 }
             })),
+            exact
         }
     }
 
     fn find_object(&self) -> Result<Option<[u16; 2]>, Box<dyn Error>> {
         let screenshot = screen::get();
-
         let image = &self.image;
-        let coords = self
-            .coords
-            .iter()
-            .copied()
-            .find(|&c| pixen::matches_at(&*screenshot, image, c))
-            .or_else(|| pixen::find_best(&*screenshot, image));
+
+        let coords = self.matches_at_coords()?
+            .or_else(|| {
+                let e = pixen::find_exact(&*screenshot, image);
+                if self.exact {
+                    e
+                } else {
+                    set_exact(&self.name).unwrap();
+                    e.or_else(|| pixen::find_best(&screenshot, image))
+                }
+            });
 
         Ok(if let Some(coords) = coords {
             add_coords(&self.name, coords)?;
@@ -239,12 +245,20 @@ impl ScreenObject {
     }
 
     fn is_on_screen(&self) -> Result<bool, Box<dyn Error>> {
-        Ok(if let Some(coords) = self.matches_at_coords() {
+        Ok(if let Some(coords) = self.matches_at_coords()? {
             add_coords(&self.name, coords)?;
             true
         } else {
             let screenshot = screen::get();
-            pixen::matches(&*screenshot, &self.image)
+            let image = &self.image;
+
+            let e = pixen::matches_exact(&*screenshot, image);
+            if self.exact {
+                e
+            } else {
+                e || pixen::matches(&*screenshot, image)
+            }
+
         })
     }
 
@@ -261,14 +275,21 @@ impl ScreenObject {
         }
     }
 
-    fn matches_at_coords(&self) -> Option<[u16; 2]> {
+    fn matches_at_coords(&self) -> Result<Option<[u16; 2]>, Box<dyn Error>> {
         let screenshot = screen::get();
         let image = &self.image;
 
-        self.coords
-            .iter()
-            .copied()
-            .find(|&c| pixen::matches_at(&*screenshot, image, c))
+        let mut coords = self.coords.iter().copied();
+        let e = coords.clone().find(|&c| pixen::matches_exact_at(&*screenshot, image, c));
+
+        Ok(if self.exact {
+            e
+        } else {
+            if e.is_some() {
+                set_exact(self.name.as_str())?;
+            }
+            e.or_else(|| coords.find(|&c| pixen::matches_at(&*screenshot, image, c)))
+        })
     }
 }
 
