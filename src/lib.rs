@@ -18,7 +18,6 @@ pub mod adb;
 mod screen;
 pub mod utils;
 
-use adb::screenshot;
 use screen::RGB_CHANNELS;
 use utils::*;
 
@@ -33,7 +32,7 @@ mod screen_objects {
     use ScreenObject;
 
     #[pymodule_export]
-    use screenshot;
+    use adb::screenshot;
 
     #[pyfunction]
     fn reset_screen() {
@@ -176,6 +175,15 @@ impl ScreenObject {
                 false
             }
         )
+    }
+
+    fn tap_best(&self) -> u8 {
+        let screenshot = screen::get();
+        let image = &self.image;
+
+        let (diff, coords) = pixen::find_best_without_threshold(&*screenshot, image);
+        adb::tap(coords);
+        diff
     }
 }
 
