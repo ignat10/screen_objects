@@ -18,7 +18,8 @@ pub(super) fn add_coords(key: &str, val: [u16; 2]) -> Result<(), Box<dyn std::er
     DATA.write()?
         .get_mut(key)
         .unwrap()
-        .push(val);
+        .insert(val);
+    
     let writer = io::BufWriter::new(fs::File::create(DATA_PATH.get().unwrap())?);
     serde_json::to_writer_pretty(writer, &*DATA.read()?)?;
     Ok(())

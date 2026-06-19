@@ -1,7 +1,7 @@
 #![feature(vec_into_chunks)]
 #![feature(mapped_lock_guards)]
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
@@ -49,7 +49,7 @@ mod screen_objects {
 }
 
 static DATA_PATH: OnceLock<PathBuf> = OnceLock::new();
-static DATA: LazyLock<RwLock<HashMap<String, Vec<[u16; 2]>>>> = LazyLock::new(|| {
+static DATA: LazyLock<RwLock<HashMap<String, HashSet<[u16; 2]>>>> = LazyLock::new(|| {
     let path = DATA_PATH.get().expect("DATA_PATH must be initialized");
 
     if !path.exists() {
@@ -58,7 +58,7 @@ static DATA: LazyLock<RwLock<HashMap<String, Vec<[u16; 2]>>>> = LazyLock::new(||
 
     let file = fs::File::open(&path).expect("Failed to open file");
 
-    let map: HashMap<String, Vec<[u16; 2]>> = from_reader(file).expect("Failed to parse JSON");
+    let map = from_reader(file).expect("Failed to parse JSON");
 
     RwLock::new(map)
 });
@@ -95,17 +95,9 @@ fn get_objects(samples_dir: PathBuf) -> PyResult<HashMap<String, ScreenObject>> 
             .to_string();
 
         if !lock.contains_key(&name) {
-            lock.insert(name.clone(), Vec::new());
+            lock.insert(name.clone(), HashSet::new());
         };
-        let coords_vec = lock.get_mut(&name).unwrap();
-        let coords = if coords_vec.len() < 5 {
-            None
-        } else if coords_vec.windows(2).all(|w| w[0] == w[1]) {
-            coords_vec.first().cloned()
-        } else {
-            coords_vec.clear();
-            None
-        };
+        let coords = lock.get(&name).unwrap().clone();
 
         objects.insert(name, ScreenObject::new(file, coords));
     }
@@ -116,7 +108,7 @@ fn get_objects(samples_dir: PathBuf) -> PyResult<HashMap<String, ScreenObject>> 
 struct ScreenObject {
     name: String,
     image: LazyLock<Image, Box<dyn FnOnce() -> Image + Send + Sync>>,
-    coords: Option<[u16; 2]>,
+    coords: HashSet<[u16; 2]>,
 }
 
 #[pymethods]
@@ -171,7 +163,7 @@ impl ScreenObject {
 }
 
 impl ScreenObject {
-    fn new(path: PathBuf, coords: Option<[u16; 2]>) -> Self {
+    fn new(path: PathBuf, coords: HashSet<[u16; 2]>) -> Self {
         Self {
             name: path
                 .file_stem()
@@ -206,34 +198,32 @@ impl ScreenObject {
         let screenshot = screen::get();
 
         let image = &self.image;
-        let coords = if let Some(coords) = self.coords {
-            pixen::find_best_with_hint(&*screenshot, image, coords)
-        } else {
-            pixen::find_best(&*screenshot, image)
-        };
+        let coords = self.coords
+            .iter()
+            .copied()
+            .find(|&c| pixen::matches_at(&*screenshot, image, c))
+            .or_else(|| pixen::find_best(&*screenshot, image));
 
-        if let Some(coords) = coords {
-            add_coords(&self.name, coords)?;
-            Ok(Some(coords))
-        } else {
-            Ok(None)
-        }
+        Ok(
+            if let Some(coords) = coords {
+                add_coords(&self.name, coords)?;
+                Some(coords)
+            } else {
+                None
+            }
+        )
     }
 
     fn is_on_screen(&self) -> Result<bool, Box<dyn Error>> {
-        let screenshot = screen::get();
-        let image = &self.image;
-
-        Ok(if let Some(coords) = self.coords {
-            if pixen::matches_with_hint(&*screenshot, &*image, coords) {
+        Ok(
+            if let Some(coords) = self.matches_at_coords() {
                 add_coords(&self.name, coords)?;
                 true
             } else {
-                false
+                let screenshot = screen::get();
+                pixen::matches(&*screenshot, &self.image)
             }
-        } else {
-            pixen::matches(&*screenshot, &*image)
-        })
+        )
     }
 
     fn find_nth(&self, n: usize) -> Result<Option<[u16; 2]>, Box<dyn Error>> {
@@ -247,6 +237,16 @@ impl ScreenObject {
         } else {
             Ok(None)
         }
+    }
+
+    fn matches_at_coords(&self) -> Option<[u16; 2]> {
+        let screenshot = screen::get();
+        let image = &self.image;
+
+        self.coords
+            .iter()
+            .copied()
+            .find(|&c| pixen::matches_at(&*screenshot, image, c))
     }
 }
 
@@ -276,7 +276,6 @@ mod tests {
             ]
         })
     });
-
     static OBJECTS: LazyLock<HashMap<String, ScreenObject>> = LazyLock::new(|| {
         for obj in DATA.as_object().unwrap().keys() {
             let path = SAMPLES.path().join(format!("{}.png", obj));
@@ -293,14 +292,14 @@ mod tests {
     #[test]
     fn get_objects_with_data() {
         let obj = OBJECTS.get("alpha").unwrap();
-        let coords = obj.coords.unwrap();
+        let coords = obj.coords.clone();
 
-        assert_eq!(coords, [100, 200]);
+        assert_eq!(coords, HashSet::from([[100, 200]]));
     }
 
     #[test]
     fn get_objects_without_data() {
         let obj = OBJECTS.get("delta").unwrap();
-        assert!(obj.coords.is_none());
+        assert_eq!(obj.coords, HashSet::from([[0, 0], [1, 1], [2, 2]]));
     }
 }
