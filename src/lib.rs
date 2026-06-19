@@ -52,7 +52,7 @@ mod screen_objects {
 }
 
 static DATA_PATH: OnceLock<PathBuf> = OnceLock::new();
-static DATA: LazyLock<RwLock<HashMap<String, (HashSet<[u16; 2]>, bool)>>> = LazyLock::new(|| {
+static DATA: LazyLock<RwLock<HashMap<String, (HashSet<[u16; 2]>, u16)>>> = LazyLock::new(|| {
     let path = DATA_PATH.get().expect("DATA_PATH must be initialized");
 
     if !path.exists() {
@@ -99,11 +99,10 @@ fn get_objects(samples_dir: PathBuf) -> PyResult<HashMap<String, ScreenObject>> 
             .to_string();
 
         if !lock.contains_key(&name) {
-            lock.insert(name.clone(), (HashSet::new(), false));
+            lock.insert(name.clone(), (HashSet::new(), 0));
         };
-        let (coords, exact) = lock.get(&name).unwrap().clone();
 
-        objects.insert(name, ScreenObject::new(file, coords, exact));
+        objects.insert(name, ScreenObject::new(file));
     }
     Ok(objects)
 }
@@ -112,8 +111,6 @@ fn get_objects(samples_dir: PathBuf) -> PyResult<HashMap<String, ScreenObject>> 
 struct ScreenObject {
     name: String,
     image: LazyLock<Image, Box<dyn FnOnce() -> Image + Send + Sync>>,
-    coords: HashSet<[u16; 2]>,
-    exact: bool,
 }
 
 #[pymethods]
@@ -189,14 +186,13 @@ impl ScreenObject {
 }
 
 impl ScreenObject {
-    fn new(path: PathBuf, coords: HashSet<[u16; 2]>, exact: bool) -> Self {
+    fn new(path: PathBuf) -> Self {
         Self {
             name: path
                 .file_stem()
                 .and_then(|n| n.to_str())
                 .unwrap()
                 .to_string(),
-            coords,
             image: LazyLock::new(Box::new(move || {
                 let img = image::load(&path);
                 match img {
@@ -217,7 +213,6 @@ impl ScreenObject {
                     image::LoadResult::Error(e) => panic!("Failed to load image: {}", e),
                 }
             })),
-            exact
         }
     }
 
@@ -227,11 +222,17 @@ impl ScreenObject {
                 let screenshot = screen::get();
                 let image = &self.image;
                 let e = pixen::find_exact(&*screenshot, image);
-                if self.exact {
+                if self.exact() {
                     e
                 } else {
-                    set_exact(&self.name).unwrap();
-                    e.or_else(|| pixen::find_best(&screenshot, image))
+                    let n = self.name.as_str();
+                    if e.is_some() {
+                        set_exact(n).unwrap();
+                        e
+                    } else {
+                        reset_exact(n).unwrap();
+                        pixen::find_best(&screenshot, image)
+                    }
                 }
             });
 
@@ -252,10 +253,17 @@ impl ScreenObject {
             let image = &self.image;
 
             let e = pixen::matches_exact(&*screenshot, image);
-            if self.exact {
+            if self.exact() {
                 e
             } else {
-                e || pixen::matches(&*screenshot, image)
+                let n = self.name.as_str();
+                if e {
+                    set_exact(n)?;
+                    true
+                } else {
+                    reset_exact(n)?;
+                    pixen::matches(&*screenshot, image)
+                }
             }
 
         })
@@ -278,17 +286,33 @@ impl ScreenObject {
         let screenshot = screen::get();
         let image = &self.image;
 
-        let mut coords = self.coords.iter().copied();
-        let e = coords.clone().find(|&c| pixen::matches_exact_at(&*screenshot, image, c));
+        let coords = self.coords();
+        let e = coords.clone().into_iter().find(|&c| pixen::matches_exact_at(&*screenshot, image, c));
 
-        Ok(if self.exact {
+        Ok(if self.exact() {
             e
         } else {
+            let n = self.name.as_str();
             if e.is_some() {
-                set_exact(self.name.as_str())?;
+                set_exact(n)?;
+                e
+            } else {
+                reset_exact(n)?;
+                coords.into_iter().find(|&c| pixen::matches_at(&*screenshot, image, c))
             }
-            e.or_else(|| coords.find(|&c| pixen::matches_at(&*screenshot, image, c)))
         })
+    }
+
+    fn coords(&self) -> HashSet<[u16; 2]> {
+        self.data().0
+    }
+
+    fn exact (&self) -> bool {
+        self.data().1 > 5
+    }
+
+    fn data(&self) -> (HashSet<[u16; 2]>, u16) {
+        DATA.read().unwrap().get(&self.name).unwrap().clone()
     }
 }
 
@@ -334,7 +358,7 @@ mod tests {
     #[test]
     fn get_objects_with_data() {
         let obj = OBJECTS.get("alpha").unwrap();
-        let coords = obj.coords.clone();
+        let coords = obj.coords();
 
         assert_eq!(coords, HashSet::from([[100, 200]]));
     }
@@ -342,6 +366,6 @@ mod tests {
     #[test]
     fn get_objects_without_data() {
         let obj = OBJECTS.get("delta").unwrap();
-        assert_eq!(obj.coords, HashSet::from([[0, 0], [1, 1], [2, 2]]));
+        assert_eq!(obj.coords(), HashSet::from([[0, 0], [1, 1], [2, 2]]));
     }
 }

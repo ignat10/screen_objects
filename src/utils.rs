@@ -1,6 +1,7 @@
 use crate::{DATA, DATA_PATH};
 use pixen::Image;
 use std::{fs, io};
+use std::error::Error;
 
 pub(crate) fn rgba_into_rgb(rgba: Vec<u8>) -> Vec<u8> {
     assert_eq!(rgba.len() % 4, 0);
@@ -14,17 +15,22 @@ pub(crate) fn rgba_into_rgb(rgba: Vec<u8>) -> Vec<u8> {
     rgb
 }
 
-pub(super) fn add_coords(key: &str, val: [u16; 2]) -> Result<(), Box<dyn std::error::Error>> {
+pub(super) fn add_coords(key: &str, val: [u16; 2]) -> Result<(), Box<dyn Error>> {
     DATA.write()?.get_mut(key).unwrap().0.insert(val);
     save_data()
 }
 
-pub(super) fn set_exact(key: &str) -> Result<(), Box<dyn std::error::Error>> {
-    DATA.write()?.get_mut(key).unwrap().1 = true;
+pub(super) fn set_exact(key: &str) -> Result<(), Box<dyn Error>> {
+    DATA.write()?.get_mut(key).unwrap().1 += 1;
     save_data()
 }
 
-fn save_data() -> Result<(), Box<dyn std::error::Error>> {
+pub(super) fn reset_exact(key: &str) -> Result<(), Box<dyn Error>> {
+    DATA.write()?.get_mut(key).unwrap().1 = 0;
+    Ok(())
+}
+
+fn save_data() -> Result<(), Box<dyn Error>> {
     let writer = io::BufWriter::new(fs::File::create(DATA_PATH.get().unwrap())?);
     serde_json::to_writer_pretty(writer, &*DATA.read()?)?;
     Ok(())
