@@ -1,5 +1,5 @@
-use std::io::{stdin, Write};
 use std::fs::File;
+use std::io::{Write, stdin};
 use std::path::PathBuf;
 use std::process::{Command, Output};
 use std::sync::{LazyLock, OnceLock};
@@ -63,8 +63,7 @@ pub(super) fn tap(coords: [u16; 2]) {
 #[pyfunction]
 pub(super) fn screenshot() -> PyResult<()> {
     let mut file = File::create("screen.png")?;
-    let out =device_action(&["exec-out", "screencap", "-p"])
-        .stdout;
+    let out = device_action(&["exec-out", "screencap", "-p"]).stdout;
     file.write_all(&out)?;
     Ok(())
 }

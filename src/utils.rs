@@ -15,11 +15,8 @@ pub(crate) fn rgba_into_rgb(rgba: Vec<u8>) -> Vec<u8> {
 }
 
 pub(super) fn add_coords(key: &str, val: [u16; 2]) -> Result<(), Box<dyn std::error::Error>> {
-    DATA.write()?
-        .get_mut(key)
-        .unwrap()
-        .insert(val);
-    
+    DATA.write()?.get_mut(key).unwrap().insert(val);
+
     let writer = io::BufWriter::new(fs::File::create(DATA_PATH.get().unwrap())?);
     serde_json::to_writer_pretty(writer, &*DATA.read()?)?;
     Ok(())

@@ -18,6 +18,7 @@ pub mod adb;
 mod screen;
 pub mod utils;
 
+use adb::screenshot;
 use screen::RGB_CHANNELS;
 use utils::*;
 
@@ -30,6 +31,9 @@ mod screen_objects {
 
     #[pymodule_export]
     use ScreenObject;
+
+    #[pymodule_export]
+    use screenshot;
 
     #[pyfunction]
     fn reset_screen() {
@@ -83,7 +87,8 @@ fn get_objects(samples_dir: PathBuf) -> PyResult<HashMap<String, ScreenObject>> 
                 .join("objects_data.json"),
         )
         .map_err(|e| PyRuntimeError::new_err(e.to_string_lossy().into_owned()))?;
-    let mut lock = DATA.write()
+    let mut lock = DATA
+        .write()
         .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
 
     let mut objects = HashMap::new();
@@ -114,12 +119,16 @@ struct ScreenObject {
 #[pymethods]
 impl ScreenObject {
     fn exists(&self) -> PyResult<bool> {
-        self.is_on_screen().map_err(|e| PyRuntimeError::new_err(e.to_string()))
+        self.is_on_screen()
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }
 
     fn tap(&self) -> PyResult<bool> {
         Ok(
-            if let Some(coords) = self.find_object().map_err(|e| PyRuntimeError::new_err(e.to_string()))? {
+            if let Some(coords) = self
+                .find_object()
+                .map_err(|e| PyRuntimeError::new_err(e.to_string()))?
+            {
                 let center = center_coords(coords, &self.image);
                 Python::attach(|py| py.check_signals())?;
                 adb::tap(center);
@@ -132,20 +141,28 @@ impl ScreenObject {
     }
 
     fn tap_nth(&self, n: usize) -> PyResult<bool> {
-        Ok(if let Some(coords) = self.find_nth(n).map_err(|e| PyRuntimeError::new_err(e.to_string()))? {
-            let center = center_coords(coords, &self.image);
-            Python::attach(|py| py.check_signals())?;
-            adb::tap(center);
-            screen::reset();
-            true
-        } else {
-            false
-        })
+        Ok(
+            if let Some(coords) = self
+                .find_nth(n)
+                .map_err(|e| PyRuntimeError::new_err(e.to_string()))?
+            {
+                let center = center_coords(coords, &self.image);
+                Python::attach(|py| py.check_signals())?;
+                adb::tap(center);
+                screen::reset();
+                true
+            } else {
+                false
+            }
+        )
     }
 
     fn spam_tap(&self, n: u8, interval: f32) -> PyResult<bool> {
         Ok(
-            if let Some(coords) = self.find_object().map_err(|e| PyRuntimeError::new_err(e.to_string()))? {
+            if let Some(coords) = self
+                .find_object()
+                .map_err(|e| PyRuntimeError::new_err(e.to_string()))?
+            {
                 let image = &self.image;
                 let center = center_coords(coords, image);
                 for _ in 0..n {
@@ -198,32 +215,29 @@ impl ScreenObject {
         let screenshot = screen::get();
 
         let image = &self.image;
-        let coords = self.coords
+        let coords = self
+            .coords
             .iter()
             .copied()
             .find(|&c| pixen::matches_at(&*screenshot, image, c))
             .or_else(|| pixen::find_best(&*screenshot, image));
 
-        Ok(
-            if let Some(coords) = coords {
-                add_coords(&self.name, coords)?;
-                Some(coords)
-            } else {
-                None
-            }
-        )
+        Ok(if let Some(coords) = coords {
+            add_coords(&self.name, coords)?;
+            Some(coords)
+        } else {
+            None
+        })
     }
 
     fn is_on_screen(&self) -> Result<bool, Box<dyn Error>> {
-        Ok(
-            if let Some(coords) = self.matches_at_coords() {
-                add_coords(&self.name, coords)?;
-                true
-            } else {
-                let screenshot = screen::get();
-                pixen::matches(&*screenshot, &self.image)
-            }
-        )
+        Ok(if let Some(coords) = self.matches_at_coords() {
+            add_coords(&self.name, coords)?;
+            true
+        } else {
+            let screenshot = screen::get();
+            pixen::matches(&*screenshot, &self.image)
+        })
     }
 
     fn find_nth(&self, n: usize) -> Result<Option<[u16; 2]>, Box<dyn Error>> {
