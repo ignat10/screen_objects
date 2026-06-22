@@ -167,13 +167,17 @@ impl ScreenObject {
     }
 
     fn tap_best(&self) -> PyResult<u8> {
+        print!("getting best screen ");
         let screenshot = screen::get()?;
         let image = &self.image;
 
+        print!("getting best tolerance ");
         let (diff, coords) = pixen::get_tolerance(&*screenshot, image);
+        print!("adding coords");
         add_coords(&self.name, coords)?;
+        print!("adding tolerance");
         set_tolerance(&self.name, diff)?;
-        
+        print!("tapping");
         adb::tap(coords)?;
         Ok(diff)
     }
@@ -253,11 +257,13 @@ impl ScreenObject {
     }
 
     fn matches_at_coords(&self) -> PyResult<Option<[u16; 2]>> {
+        print!("getting coord screen");
         let screenshot = screen::get()?;
         let image = &self.image;
         let coords = &self.coords;
         let tolerance = self.tolerance;
 
+        println!("matching at each coord");
         Ok(coords.iter().copied().find(|&c| pixen::matches_at(&*screenshot, image, c, tolerance)))
     }
 }
