@@ -19,7 +19,6 @@ pub mod adb;
 mod screen;
 pub mod utils;
 
-use screen::RGB_CHANNELS;
 use utils::*;
 
 const BASE_TOLERANCE: u8 = 5;
@@ -98,7 +97,8 @@ fn get_objects(samples_dir: PathBuf) -> PyResult<HashMap<String, ScreenObject>> 
     for file in files {
         let name = file
             .file_stem()
-            .and_then(|n| n.to_str())
+            .unwrap()
+            .to_str()
             .unwrap()
             .to_string();
 
@@ -124,67 +124,50 @@ struct ScreenObject {
 impl ScreenObject {
     fn exists(&self) -> PyResult<bool> {
         self.is_on_screen()
-            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }
 
     fn tap(&self) -> PyResult<bool> {
-        Ok(
-            if let Some(coords) = self
-                .find_object()
-                .map_err(|e| PyRuntimeError::new_err(e.to_string()))?
-            {
-                let center = center_coords(coords, &self.image);
-                Python::attach(|py| py.check_signals())?;
-                adb::tap(center)?;
-                screen::reset();
-                true
-            } else {
-                false
-            }
-        )
+        if let Some(coords) = self.find_object()? {
+            let center = center_coords(coords, &self.image);
+            Python::attach(|py| py.check_signals())?;
+            adb::tap(center)?;
+            screen::reset();
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     fn tap_nth(&self, n: usize) -> PyResult<bool> {
-        Ok(
-            if let Some(coords) = self
-                .find_nth(n)
-                .map_err(|e| PyRuntimeError::new_err(e.to_string()))?
-            {
-                let center = center_coords(coords, &self.image);
-                Python::attach(|py| py.check_signals())?;
-                adb::tap(center)?;
-                screen::reset();
-                true
-            } else {
-                false
-            }
-        )
+        if let Some(coords) = self.find_nth(n)? {
+            let center = center_coords(coords, &self.image);
+            Python::attach(|py| py.check_signals())?;
+            adb::tap(center)?;
+            screen::reset();
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     fn spam_tap(&self, n: u8, interval: f32) -> PyResult<bool> {
-        Ok(
-            if let Some(coords) = self
-                .find_object()
-                .map_err(|e| PyRuntimeError::new_err(e.to_string()))?
-            {
-                let image = &self.image;
-                let center = center_coords(coords, image);
-                for _ in 0..n {
-                    adb::tap(center)?;
-                    std::thread::sleep(std::time::Duration::from_secs_f32(interval));
-                    Python::attach(|py| py.check_signals())?;
-                }
-                screen::reset();
-                true
-            } else {
-                false
+        if let Some(coords) = self.find_object()? {
+            let image = &self.image;
+            let center = center_coords(coords, image);
+            for _ in 0..n {
+                adb::tap(center)?;
+                std::thread::sleep(std::time::Duration::from_secs_f32(interval));
+                Python::attach(|py| py.check_signals())?;
             }
-        )
+            screen::reset();
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     fn tap_best(&self) -> PyResult<u8> {
-        let screenshot = screen::get()
-            .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+        let screenshot = screen::get()?;
         let image = &self.image;
 
         let (diff, coords) = pixen::get_tolerance(&*screenshot, image);
@@ -209,16 +192,15 @@ impl ScreenObject {
                 let img = image::load(&path);
                 match img {
                     image::LoadResult::ImageU8(img) => Image::new(
-                        if img.depth != RGB_CHANNELS {
-                            rgba_into_rgb(img.data)
-                        } else {
-                            img.data
+                        match img.depth {
+                            screen::RGB_CHANNELS => img.data,
+                            screen::RGBA_CHANNELS => rgba_into_rgb(img.data),
+                            c => panic!("unknown number of channels: {}", c),
                         },
                         img.width,
                         img.height,
-                        RGB_CHANNELS,
-                    )
-                        .unwrap(),
+                        screen::RGB_CHANNELS,
+                    ).unwrap(),
                     image::LoadResult::ImageF32(_) => {
                         panic!("Unknown image format: {}", path.display())
                     }
@@ -226,7 +208,7 @@ impl ScreenObject {
                 }
             })),
             coords,
-            tolerance
+            tolerance,
         }
     }
 
@@ -235,13 +217,16 @@ impl ScreenObject {
         if coords.is_some() {
             Ok(coords)
         } else {
+            print!("before_screen");
             let screenshot = screen::get()?;
-            let image = &self.image;
+            print!("got_screen");
             let tolerance = self.tolerance;
 
-            let coords = pixen::find_best(&*screenshot, image, tolerance);
+            let coords = pixen::find_best(&screenshot, &self.image, tolerance);
             if let Some(coords) = coords {
+                print!("before add coords");
                 add_coords(&self.name, coords)?;
+                print!("after add coords");
             }
             Ok(coords)
         }
