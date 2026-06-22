@@ -1,7 +1,12 @@
-use crate::{DATA, DATA_PATH};
 use pixen::Image;
 use std::{fs, io};
-use std::error::Error;
+use std::collections::{HashMap, HashSet};
+use std::sync::RwLockWriteGuard;
+
+use pyo3::prelude::PyResult;
+use pyo3::exceptions::PyRuntimeError;
+
+use crate::{DATA, DATA_PATH};
 
 pub(crate) fn rgba_into_rgb(rgba: Vec<u8>) -> Vec<u8> {
     assert_eq!(rgba.len() % 4, 0);
@@ -15,24 +20,39 @@ pub(crate) fn rgba_into_rgb(rgba: Vec<u8>) -> Vec<u8> {
     rgb
 }
 
-pub(super) fn add_coords(key: &str, val: [u16; 2]) -> Result<(), Box<dyn Error>> {
-    DATA.write()?.get_mut(key).unwrap().0.insert(val);
-    save_data()
-}
-
-pub(super) fn set_exact(key: &str) -> Result<(), Box<dyn Error>> {
-    DATA.write()?.get_mut(key).unwrap().1 += 1;
-    save_data()
-}
-
-pub(super) fn reset_exact(key: &str) -> Result<(), Box<dyn Error>> {
-    DATA.write()?.get_mut(key).unwrap().1 = 0;
+pub(super) fn add_coords(key: &str, val: [u16; 2]) -> PyResult<()> {
+    get_lock()?.get_mut(key).unwrap().0.insert(val);
+    save_data()?;
     Ok(())
 }
 
-fn save_data() -> Result<(), Box<dyn Error>> {
-    let writer = io::BufWriter::new(fs::File::create(DATA_PATH.get().unwrap())?);
-    serde_json::to_writer_pretty(writer, &*DATA.read()?)?;
+fn get_lock() -> PyResult<RwLockWriteGuard<'static, HashMap<String, (HashSet<[u16; 2]>, u8)>>> {
+    DATA
+        .write()
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+}
+
+pub(super) fn set_tolerance(key: &str, tolerance: u8) -> PyResult<()> {
+    let mut lock = get_lock()?;
+    let t = lock.get_mut(key).unwrap();
+    t.1 = t.1.max(tolerance);
+    save_data()?;
+    Ok(())
+}
+
+pub(super) fn reset_tolerance(key: &str) -> PyResult<()> {
+    get_lock()?.get_mut(key).unwrap().1 = 0;
+    Ok(())
+}
+
+fn save_data() -> PyResult<()> {
+    let writer = io::BufWriter::new(fs::File::create(DATA_PATH.get().unwrap()).map_err(|e| PyRuntimeError::new_err(e.to_string()))?);
+    serde_json::to_writer_pretty(
+        writer,
+        &*DATA.read()
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))?
+    )
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
     Ok(())
 }
 

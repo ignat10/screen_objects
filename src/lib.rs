@@ -1,8 +1,9 @@
 #![feature(vec_into_chunks)]
 #![feature(mapped_lock_guards)]
+#![feature(iter_array_chunks)]
+#![feature(pathbuf_into_string)]
 
 use std::collections::{HashMap, HashSet};
-use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{LazyLock, OnceLock, RwLock};
@@ -20,6 +21,8 @@ pub mod utils;
 
 use screen::RGB_CHANNELS;
 use utils::*;
+
+const BASE_TOLERANCE: u8 = 5;
 
 #[pymodule]
 mod screen_objects {
@@ -40,23 +43,25 @@ mod screen_objects {
     }
 
     #[pyfunction]
-    fn device_config(adb: PathBuf, ip: Option<String>) {
-        adb::device_config(adb, ip);
+    fn device_config(adb: PathBuf, ip: Option<String>) -> PyResult<()> {
+        adb::device_config(adb, ip)
     }
 
     #[pyfunction]
-    fn back() {
-        adb::back();
+    fn back() -> PyResult<()> {
+        adb::back()?;
         screen::reset();
+        Ok(())
     }
 }
 
 static DATA_PATH: OnceLock<PathBuf> = OnceLock::new();
-static DATA: LazyLock<RwLock<HashMap<String, (HashSet<[u16; 2]>, u16)>>> = LazyLock::new(|| {
+static DATA: LazyLock<RwLock<HashMap<String, (HashSet<[u16; 2]>, u8)>>> = LazyLock::new(|| {
     let path = DATA_PATH.get().expect("DATA_PATH must be initialized");
 
     if !path.exists() {
-        fs::write(&path, "{}").expect(format!("Failed to write empty file {}", path.display()).as_str());
+        fs::write(&path, "{}")
+            .expect(format!("Failed to write empty file {}", path.to_str().unwrap()).as_str());
     }
 
     let file = fs::File::open(&path).expect(format!("Failed to open file {}", path.display()).as_str());
@@ -99,7 +104,7 @@ fn get_objects(samples_dir: PathBuf) -> PyResult<HashMap<String, ScreenObject>> 
             .to_string();
 
         if !lock.contains_key(&name) {
-            lock.insert(name.clone(), (HashSet::new(), 0));
+            lock.insert(name.clone(), (HashSet::new(), BASE_TOLERANCE));
         };
 
         objects.insert(name, ScreenObject::new(file));
@@ -111,6 +116,8 @@ fn get_objects(samples_dir: PathBuf) -> PyResult<HashMap<String, ScreenObject>> 
 struct ScreenObject {
     name: String,
     image: LazyLock<Image, Box<dyn FnOnce() -> Image + Send + Sync>>,
+    coords: HashSet<[u16; 2]>,
+    tolerance: u8,
 }
 
 #[pymethods]
@@ -128,7 +135,7 @@ impl ScreenObject {
             {
                 let center = center_coords(coords, &self.image);
                 Python::attach(|py| py.check_signals())?;
-                adb::tap(center);
+                adb::tap(center)?;
                 screen::reset();
                 true
             } else {
@@ -145,7 +152,7 @@ impl ScreenObject {
             {
                 let center = center_coords(coords, &self.image);
                 Python::attach(|py| py.check_signals())?;
-                adb::tap(center);
+                adb::tap(center)?;
                 screen::reset();
                 true
             } else {
@@ -163,7 +170,7 @@ impl ScreenObject {
                 let image = &self.image;
                 let center = center_coords(coords, image);
                 for _ in 0..n {
-                    adb::tap(center);
+                    adb::tap(center)?;
                     std::thread::sleep(std::time::Duration::from_secs_f32(interval));
                     Python::attach(|py| py.check_signals())?;
                 }
@@ -175,24 +182,30 @@ impl ScreenObject {
         )
     }
 
-    fn tap_best(&self) -> u8 {
-        let screenshot = screen::get();
+    fn tap_best(&self) -> PyResult<u8> {
+        let screenshot = screen::get()
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
         let image = &self.image;
 
-        let (diff, coords) = pixen::find_best_without_threshold(&*screenshot, image);
-        adb::tap(coords);
-        diff
+        let (diff, coords) = pixen::get_tolerance(&*screenshot, image);
+        add_coords(&self.name, coords)?;
+        set_tolerance(&self.name, diff)?;
+        
+        adb::tap(coords)?;
+        Ok(diff)
+    }
+    
+    fn reset_tolerance(&self) -> PyResult<()> {
+        reset_tolerance(self.name.as_str())
     }
 }
 
 impl ScreenObject {
     fn new(path: PathBuf) -> Self {
+        let name = path.file_name().unwrap().to_str().unwrap().to_string();
+        let (coords, tolerance) = DATA.read().unwrap().get(&name).unwrap().clone();
         Self {
-            name: path
-                .file_stem()
-                .and_then(|n| n.to_str())
-                .unwrap()
-                .to_string(),
+            name,
             image: LazyLock::new(Box::new(move || {
                 let img = image::load(&path);
                 match img {
@@ -206,113 +219,62 @@ impl ScreenObject {
                         img.height,
                         RGB_CHANNELS,
                     )
-                    .unwrap(),
+                        .unwrap(),
                     image::LoadResult::ImageF32(_) => {
                         panic!("Unknown image format: {}", path.display())
                     }
                     image::LoadResult::Error(e) => panic!("Failed to load image: {}", e),
                 }
             })),
+            coords,
+            tolerance
         }
     }
 
-    fn find_object(&self) -> Result<Option<[u16; 2]>, Box<dyn Error>> {
-        let coords = self.matches_at_coords()?
-            .or_else(|| {
-                let screenshot = screen::get();
-                let image = &self.image;
-                let e = pixen::find_exact(&*screenshot, image);
-                if self.exact() {
-                    e
-                } else {
-                    let n = self.name.as_str();
-                    if e.is_some() {
-                        set_exact(n).unwrap();
-                        e
-                    } else {
-                        reset_exact(n).unwrap();
-                        pixen::find_best(&screenshot, image)
-                    }
-                }
-            });
-
-        Ok(if let Some(coords) = coords {
-            add_coords(&self.name, coords)?;
-            Some(coords)
+    fn find_object(&self) -> PyResult<Option<[u16; 2]>> {
+        let coords = self.matches_at_coords()?;
+        if coords.is_some() {
+            Ok(coords)
         } else {
-            None
-        })
-    }
-
-    fn is_on_screen(&self) -> Result<bool, Box<dyn Error>> {
-        Ok(if let Some(coords) = self.matches_at_coords()? {
-            add_coords(&self.name, coords)?;
-            true
-        } else {
-            let screenshot = screen::get();
+            let screenshot = screen::get()?;
             let image = &self.image;
+            let tolerance = self.tolerance;
 
-            let e = pixen::matches_exact(&*screenshot, image);
-            if self.exact() {
-                e
-            } else {
-                let n = self.name.as_str();
-                if e {
-                    set_exact(n)?;
-                    true
-                } else {
-                    reset_exact(n)?;
-                    pixen::matches(&*screenshot, image)
-                }
+            let coords = pixen::find_best(&*screenshot, image, tolerance);
+            if let Some(coords) = coords {
+                add_coords(&self.name, coords)?;
             }
-
-        })
-    }
-
-    fn find_nth(&self, n: usize) -> Result<Option<[u16; 2]>, Box<dyn Error>> {
-        let screenshot = screen::get();
-
-        let coords = pixen::find_nth(&*screenshot, &self.image, n);
-
-        if let Some(coords) = coords {
-            add_coords(&self.name, coords)?;
-            Ok(Some(coords))
-        } else {
-            Ok(None)
+            Ok(coords)
         }
     }
 
-    fn matches_at_coords(&self) -> Result<Option<[u16; 2]>, Box<dyn Error>> {
-        let screenshot = screen::get();
-        let image = &self.image;
-
-        let coords = self.coords();
-        let e = coords.clone().into_iter().find(|&c| pixen::matches_exact_at(&*screenshot, image, c));
-
-        Ok(if self.exact() {
-            e
+    fn is_on_screen(&self) -> PyResult<bool> {
+        if self.matches_at_coords()?.is_some() {
+            Ok(true)
         } else {
-            let n = self.name.as_str();
-            if e.is_some() {
-                set_exact(n)?;
-                e
-            } else {
-                reset_exact(n)?;
-                coords.into_iter().find(|&c| pixen::matches_at(&*screenshot, image, c))
-            }
-        })
+            let screenshot = screen::get()?;
+            let image = &self.image;
+            let tolerance = self.tolerance;
+
+            Ok(pixen::matches(&*screenshot, image, tolerance))
+        }
     }
 
-    fn coords(&self) -> HashSet<[u16; 2]> {
-        self.data().0
+    fn find_nth(&self, n: usize) -> PyResult<Option<[u16; 2]>> {
+        let screenshot = screen::get()?;
+        let image = &self.image;
+        let tolerance = self.tolerance;
+
+        Ok(pixen::find_nth(&*screenshot, image, tolerance, n))
     }
 
-    fn exact (&self) -> bool {
-        self.data().1 > 5
-    }
+    fn matches_at_coords(&self) -> PyResult<Option<[u16; 2]>> {
+        let screenshot = screen::get()?;
+        let image = &self.image;
+        let coords = &self.coords;
+        let tolerance = self.tolerance;
 
-    fn data(&self) -> (HashSet<[u16; 2]>, u16) {
-        DATA.read().unwrap().get(&self.name).unwrap().clone()
+        Ok(coords.iter().copied().find(|&c| pixen::matches_at(&*screenshot, image, c, tolerance)))
     }
 }
 
@@ -326,20 +288,26 @@ mod tests {
     static SAMPLES: LazyLock<TempDir> = LazyLock::new(|| tempdir().unwrap());
     static DATA: LazyLock<Value> = LazyLock::new(|| {
         json!({
-            "alpha": [
-                [100, 200],
-                [100, 200],
-                [100, 200],
-                [100, 200],
-                [100, 200]
-            ],
-            "delta": [
-                [0, 0],
-                [0, 0],
-                [1, 1],
-                [1, 1],
-                [2, 2]
-            ]
+            "alpha": (
+                [
+                    [100, 200],
+                    [100, 200],
+                    [100, 200],
+                    [100, 200],
+                    [100, 200]
+                ],
+                5
+            ),
+            "delta": (
+                [
+                    [0, 0],
+                    [0, 0],
+                    [1, 1],
+                    [1, 1],
+                    [2, 2]
+                ],
+                6
+            )
         })
     });
     static OBJECTS: LazyLock<HashMap<String, ScreenObject>> = LazyLock::new(|| {
@@ -358,7 +326,7 @@ mod tests {
     #[test]
     fn get_objects_with_data() {
         let obj = OBJECTS.get("alpha").unwrap();
-        let coords = obj.coords();
+        let coords = obj.coords.clone();
 
         assert_eq!(coords, HashSet::from([[100, 200]]));
     }
@@ -366,6 +334,6 @@ mod tests {
     #[test]
     fn get_objects_without_data() {
         let obj = OBJECTS.get("delta").unwrap();
-        assert_eq!(obj.coords(), HashSet::from([[0, 0], [1, 1], [2, 2]]));
+        assert_eq!(obj.coords, HashSet::from([[0, 0], [1, 1], [2, 2]]));
     }
 }
