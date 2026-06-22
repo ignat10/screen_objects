@@ -73,14 +73,13 @@ static DATA: LazyLock<RwLock<HashMap<String, (HashSet<[u16; 2]>, u8)>>> = LazyLo
 
 #[pyfunction]
 fn get_objects(samples_dir: PathBuf) -> PyResult<HashMap<String, ScreenObject>> {
-    let files: Vec<PathBuf> = WalkDir::new(&samples_dir)
+    let files = WalkDir::new(&samples_dir)
         .into_iter()
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| PyRuntimeError::new_err(e.to_string()))?
         .into_iter()
         .filter(|entry| entry.file_type().is_file())
-        .map(|entry| entry.into_path())
-        .collect();
+        .map(|entry| entry.into_path());
 
     DATA_PATH
         .set(
@@ -106,8 +105,9 @@ fn get_objects(samples_dir: PathBuf) -> PyResult<HashMap<String, ScreenObject>> 
         if !lock.contains_key(&name) {
             lock.insert(name.clone(), (HashSet::new(), BASE_TOLERANCE));
         };
+        let (coords, tolerance) = lock.get(&name).unwrap().clone();
 
-        objects.insert(name, ScreenObject::new(file));
+        objects.insert(name, ScreenObject::new(file, coords, tolerance));
     }
     Ok(objects)
 }
@@ -201,9 +201,8 @@ impl ScreenObject {
 }
 
 impl ScreenObject {
-    fn new(path: PathBuf) -> Self {
+    fn new(path: PathBuf, coords: HashSet<[u16; 2]>, tolerance: u8) -> Self {
         let name = path.file_name().unwrap().to_str().unwrap().to_string();
-        let (coords, tolerance) = DATA.read().unwrap().get(&name).unwrap().clone();
         Self {
             name,
             image: LazyLock::new(Box::new(move || {
