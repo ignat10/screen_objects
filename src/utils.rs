@@ -36,7 +36,7 @@ pub(super) fn set_tolerance(key: &str, tolerance: u8) -> PyResult<()> {
     let mut lock = get_lock()?;
     let t = lock.get_mut(key).unwrap();
     t.1 = t.1.max(tolerance);
-    drop(t);
+    drop(lock);
     save_data()?;
     Ok(())
 }
