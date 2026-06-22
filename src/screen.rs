@@ -8,6 +8,7 @@ use crate::adb;
 use crate::utils::rgba_into_rgb;
 
 pub(crate) const RGB_CHANNELS: usize = 3;
+pub(crate) const RGBA_CHANNELS: usize = 4;
 
 static SCREENSHOT: RwLock<Option<Image>> = RwLock::new(None);
 
@@ -23,7 +24,7 @@ pub(super) fn get() -> PyResult<MappedRwLockReadGuard<'static, Image>> {
             h.try_into().unwrap(),
             RGB_CHANNELS,
         )
-            .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+            .map_err(|e| PyRuntimeError::new_err(e))?;
 
         *guard = Some(image);
     }
