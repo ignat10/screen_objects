@@ -202,7 +202,7 @@ impl ScreenObject {
 
 impl ScreenObject {
     fn new(path: PathBuf, coords: HashSet<[u16; 2]>, tolerance: u8) -> Self {
-        let name = path.file_name().unwrap().to_str().unwrap().to_string();
+        let name = path.file_stem().unwrap().to_str().unwrap().to_string();
         Self {
             name,
             image: LazyLock::new(Box::new(move || {
