@@ -173,17 +173,17 @@ impl ScreenObject {
     }
 
     fn tap_best(&self) -> PyResult<u8> {
-        print!("getting best screen ");
+        println!("getting best screen ");
         let screenshot = screen::get()?;
         let image = &self.image;
 
-        print!("getting best tolerance ");
+        println!("getting best tolerance ");
         let (diff, coords) = pixen::get_tolerance(&*screenshot, image);
-        print!("adding coords");
+        println!("adding coords");
         add_coords(&self.name, coords)?;
-        print!("adding tolerance");
+        println!("adding tolerance");
         set_tolerance(&self.name, diff)?;
-        print!("tapping");
+        println!("tapping");
         adb::tap(coords)?;
         Ok(diff)
     }
