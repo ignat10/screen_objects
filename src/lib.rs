@@ -150,6 +150,12 @@ impl ScreenObject {
         }
     }
 
+    fn count(&self) -> PyResult<u16> {
+        let screenshot = screen::get()?;
+
+        Ok(pixen::count(&*screenshot, &self.image, self.tolerance))
+    }
+
     fn spam_tap(&self, n: u8, interval: f32) -> PyResult<bool> {
         if let Some(coords) = self.find_object()? {
             let image = &self.image;
