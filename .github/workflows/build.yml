@@ -21,9 +21,31 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@nightly
 
-      - run: pip install maturin
+      - name: Install maturin
+        run: pip install maturin
 
       - name: Build wheel
+        run: maturin build --release --out dist
+
+      - name: Install wheel + stub tools
+        shell: bash
+        run: |
+          pip install mypy
+          pip install dist/*.whl
+
+      - name: Generate stubs
+        shell: bash
+        run: |
+          mkdir -p python_stubs
+          stubgen -m screen_objects -o python_stubs
+
+      - name: Embed stubs into package
+        shell: bash
+        run: |
+          mkdir -p screen_objects
+          cp python_stubs/screen_objects.pyi screen_objects/__init__.pyi
+
+      - name: Rebuild wheel with stubs included
         run: maturin build --release --out dist
 
       - uses: actions/upload-artifact@v4

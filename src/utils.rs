@@ -1,7 +1,5 @@
 use pixen::Image;
 use std::{fs, io};
-use std::collections::HashMap;
-use std::sync::RwLockWriteGuard;
 
 use pyo3::prelude::PyResult;
 use pyo3::exceptions::PyRuntimeError;
@@ -18,12 +16,6 @@ pub(crate) fn rgba_into_rgb(rgba: Vec<u8>) -> Vec<u8> {
         rgb.push(b);
     }
     rgb
-}
-
-fn get_lock() -> PyResult<RwLockWriteGuard<'static, HashMap<String, (Option<[u16; 2]>, u8)>>> {
-    DATA
-        .write()
-        .map_err(|e| PyRuntimeError::new_err(e.to_string()))
 }
 
 pub(super) fn save_data() -> PyResult<()> {

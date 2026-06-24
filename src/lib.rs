@@ -122,13 +122,20 @@ struct ScreenObject {
 
 #[pymethods]
 impl ScreenObject {
-    fn set_fixed(&self) -> PyResult<()> {
+    fn config(&self, fixed: bool) -> PyResult<()> {
         let screenshot = screen::get()?;
         let image = &self.image;
 
         let (diff, coords) = pixen::get_tolerance(&*screenshot, image);
 
-        *DATA.write().unwrap().get_mut(&self.name).unwrap() = (Some(coords), diff + 1);
+        *DATA.write().unwrap().get_mut(&self.name).unwrap() = (
+            if fixed {
+                Some(coords)
+            } else {
+                None
+            },
+            diff + 1
+        );
         save_data()?;
         Ok(())
     }
