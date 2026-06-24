@@ -43,7 +43,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p screen_objects
-          cp python_stubs/screen_objects.pyi screen_objects/__init__.pyi
+          cp python_stubs/screen_objects/__init__.pyi screen_objects/__init__.pyi
 
       - name: Rebuild wheel with stubs included
         run: maturin build --release --out dist
