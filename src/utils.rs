@@ -5,12 +5,13 @@ use pyo3::prelude::PyResult;
 use pyo3::exceptions::PyRuntimeError;
 
 use crate::{DATA, DATA_PATH};
+use crate::screen::RGBA_CHANNELS;
 
 pub(crate) fn rgba_into_rgb(rgba: Vec<u8>) -> Vec<u8> {
     assert_eq!(rgba.len() % 4, 0);
     let mut rgb = Vec::with_capacity(rgba.len() / 4 * 3);
 
-    for [r, g, b, _] in rgba.into_chunks::<4>() {
+    for [r, g, b, _] in rgba.into_iter().array_chunks::<RGBA_CHANNELS>() {
         rgb.push(r);
         rgb.push(g);
         rgb.push(b);

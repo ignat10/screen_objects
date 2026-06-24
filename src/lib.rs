@@ -1,7 +1,5 @@
-#![feature(vec_into_chunks)]
 #![feature(mapped_lock_guards)]
 #![feature(iter_array_chunks)]
-#![feature(pathbuf_into_string)]
 
 use std::collections::HashMap;
 use std::fs;
@@ -16,7 +14,7 @@ use stb_image::image;
 use walkdir::WalkDir;
 
 pub mod adb;
-mod screen;
+pub mod screen;
 pub mod utils;
 
 use utils::*;

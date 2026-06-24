@@ -14,7 +14,7 @@ static DEVICE_SERIAL: OnceLock<String> = OnceLock::new();
 pub(super) fn device_config(adb: PathBuf, ip: Option<String>) -> PyResult<()> {
     println!("connecting adb device...");
     ADB.set(adb)
-        .map_err(|e| PyRuntimeError::new_err(e.into_string().unwrap()))?;
+        .map_err(|_| PyRuntimeError::new_err("device_config function can only be called once."))?;
 
     let mut serial: Option<String> = scan()?;
 
@@ -61,9 +61,9 @@ pub(super) fn screenshot() -> PyResult<()> {
 pub(crate) fn screencap() -> PyResult<(u32, u32, Vec<u8>)> {
     let mut output = device_action(&["exec-out", "screencap"])?.stdout;
     let [width, height]: [u32; 2] = output.drain(..16)
-        .take(8)
         .array_chunks::<4>()
         .map(|chunk| u32::from_le_bytes(chunk))
+        .take(2)
         .collect::<Vec<u32>>()
         .try_into()
         .map_err(|v| PyBufferError::new_err(format!("Expected: width, height, found {:?}", v)))
