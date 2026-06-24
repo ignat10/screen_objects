@@ -1,6 +1,6 @@
 use pixen::Image;
 use std::{fs, io};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::RwLockWriteGuard;
 
 use pyo3::prelude::PyResult;
@@ -20,33 +20,13 @@ pub(crate) fn rgba_into_rgb(rgba: Vec<u8>) -> Vec<u8> {
     rgb
 }
 
-pub(super) fn add_coords(key: &str, val: [u16; 2]) -> PyResult<()> {
-    get_lock()?.get_mut(key).unwrap().0.insert(val);
-    save_data()?;
-    Ok(())
-}
-
-fn get_lock() -> PyResult<RwLockWriteGuard<'static, HashMap<String, (HashSet<[u16; 2]>, u8)>>> {
+fn get_lock() -> PyResult<RwLockWriteGuard<'static, HashMap<String, (Option<[u16; 2]>, u8)>>> {
     DATA
         .write()
         .map_err(|e| PyRuntimeError::new_err(e.to_string()))
 }
 
-pub(super) fn set_tolerance(key: &str, tolerance: u8) -> PyResult<()> {
-    let mut lock = get_lock()?;
-    let t = lock.get_mut(key).unwrap();
-    t.1 = t.1.max(tolerance);
-    drop(lock);
-    save_data()?;
-    Ok(())
-}
-
-pub(super) fn reset_tolerance(key: &str) -> PyResult<()> {
-    get_lock()?.get_mut(key).unwrap().1 = 0;
-    Ok(())
-}
-
-fn save_data() -> PyResult<()> {
+pub(super) fn save_data() -> PyResult<()> {
     let writer = io::BufWriter::new(fs::File::create(DATA_PATH.get().unwrap()).map_err(|e| PyRuntimeError::new_err(e.to_string()))?);
     serde_json::to_writer_pretty(
         writer,

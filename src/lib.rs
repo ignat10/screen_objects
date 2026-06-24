@@ -3,13 +3,13 @@
 #![feature(iter_array_chunks)]
 #![feature(pathbuf_into_string)]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{LazyLock, OnceLock, RwLock};
 
 use pixen::Image;
-use pyo3::exceptions::PyRuntimeError;
+use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use serde_json::from_reader;
 use stb_image::image;
@@ -55,7 +55,7 @@ mod screen_objects {
 }
 
 static DATA_PATH: OnceLock<PathBuf> = OnceLock::new();
-static DATA: LazyLock<RwLock<HashMap<String, (HashSet<[u16; 2]>, u8)>>> = LazyLock::new(|| {
+static DATA: LazyLock<RwLock<HashMap<String, (Option<[u16; 2]>, u8)>>> = LazyLock::new(|| {
     let path = DATA_PATH.get().expect("DATA_PATH must be initialized");
 
     if !path.exists() {
@@ -103,7 +103,7 @@ fn get_objects(samples_dir: PathBuf) -> PyResult<HashMap<String, ScreenObject>> 
             .to_string();
 
         if !lock.contains_key(&name) {
-            lock.insert(name.clone(), (HashSet::new(), BASE_TOLERANCE));
+            lock.insert(name.clone(), (None, BASE_TOLERANCE));
         };
         let (coords, tolerance) = lock.get(&name).unwrap().clone();
 
@@ -116,12 +116,23 @@ fn get_objects(samples_dir: PathBuf) -> PyResult<HashMap<String, ScreenObject>> 
 struct ScreenObject {
     name: String,
     image: LazyLock<Image, Box<dyn FnOnce() -> Image + Send + Sync>>,
-    coords: HashSet<[u16; 2]>,
+    coords: Option<[u16; 2]>,
     tolerance: u8,
 }
 
 #[pymethods]
 impl ScreenObject {
+    fn set_fixed(&self) -> PyResult<()> {
+        let screenshot = screen::get()?;
+        let image = &self.image;
+
+        let (diff, coords) = pixen::get_tolerance(&*screenshot, image);
+
+        *DATA.write().unwrap().get_mut(&self.name).unwrap() = (Some(coords), diff + 1);
+        save_data()?;
+        Ok(())
+    }
+
     fn exists(&self) -> PyResult<bool> {
         self.is_on_screen()
     }
@@ -171,30 +182,10 @@ impl ScreenObject {
             Ok(false)
         }
     }
-
-    fn tap_best(&self) -> PyResult<u8> {
-        println!("getting best screen ");
-        let screenshot = screen::get()?;
-        let image = &self.image;
-
-        println!("getting best tolerance ");
-        let (diff, coords) = pixen::get_tolerance(&*screenshot, image);
-        println!("adding coords");
-        add_coords(&self.name, coords)?;
-        println!("adding tolerance");
-        set_tolerance(&self.name, diff)?;
-        println!("tapping");
-        adb::tap(coords)?;
-        Ok(diff)
-    }
-    
-    fn reset_tolerance(&self) -> PyResult<()> {
-        reset_tolerance(self.name.as_str())
-    }
 }
 
 impl ScreenObject {
-    fn new(path: PathBuf, coords: HashSet<[u16; 2]>, tolerance: u8) -> Self {
+    fn new(path: PathBuf, coords: Option<[u16; 2]>, tolerance: u8) -> Self {
         let name = path.file_stem().unwrap().to_str().unwrap().to_string();
         Self {
             name,
@@ -223,28 +214,22 @@ impl ScreenObject {
     }
 
     fn find_object(&self) -> PyResult<Option<[u16; 2]>> {
-        let coords = self.matches_at_coords()?;
-        if coords.is_some() {
-            Ok(coords)
-        } else {
-            print!("before_screen");
-            let screenshot = screen::get()?;
-            print!("got_screen");
-            let tolerance = self.tolerance;
-
-            let coords = pixen::find_best(&screenshot, &self.image, tolerance);
-            if let Some(coords) = coords {
-                print!("before add coords");
-                add_coords(&self.name, coords)?;
-                print!("after add coords");
+        if self.coords.is_some() {
+            if self.matches_at_coords()? {
+                Ok(self.coords)
+            } else {
+                Ok(None)
             }
-            Ok(coords)
+        } else {
+            let screenshot = screen::get()?;
+            let tolerance = self.tolerance;
+            Ok(pixen::find_best(&screenshot, &self.image, tolerance))
         }
     }
 
     fn is_on_screen(&self) -> PyResult<bool> {
-        if self.matches_at_coords()?.is_some() {
-            Ok(true)
+        if self.coords.is_some() {
+            Ok(self.matches_at_coords()?)
         } else {
             let screenshot = screen::get()?;
             let image = &self.image;
@@ -255,22 +240,24 @@ impl ScreenObject {
     }
 
     fn find_nth(&self, n: usize) -> PyResult<Option<[u16; 2]>> {
-        let screenshot = screen::get()?;
-        let image = &self.image;
-        let tolerance = self.tolerance;
+        if self.coords.is_some() {
+            Err(PyValueError::new_err(format!("Tried to find nth {}, but it has fixed coords.", self.name)))
+        } else {
+            let screenshot = screen::get()?;
+            let image = &self.image;
+            let tolerance = self.tolerance;
 
-        Ok(pixen::find_nth(&*screenshot, image, tolerance, n))
+            Ok(pixen::find_nth(&*screenshot, image, tolerance, n))
+        }
     }
 
-    fn matches_at_coords(&self) -> PyResult<Option<[u16; 2]>> {
-        print!("getting coord screen");
+    fn matches_at_coords(&self) -> PyResult<bool> {
+        let coords = self.coords.ok_or(PyValueError::new_err(format!("Not found coords for {}.", self.name)))?;
         let screenshot = screen::get()?;
         let image = &self.image;
-        let coords = &self.coords;
         let tolerance = self.tolerance;
 
-        println!("matching at each coord");
-        Ok(coords.iter().copied().find(|&c| pixen::matches_at(&*screenshot, image, c, tolerance)))
+        Ok(pixen::matches_at(&*screenshot, image, coords, tolerance))
     }
 }
 
@@ -285,23 +272,11 @@ mod tests {
     static DATA: LazyLock<Value> = LazyLock::new(|| {
         json!({
             "alpha": (
-                [
-                    [100, 200],
-                    [100, 200],
-                    [100, 200],
-                    [100, 200],
-                    [100, 200]
-                ],
+                [100, 200],
                 5
             ),
             "delta": (
-                [
-                    [0, 0],
-                    [0, 0],
-                    [1, 1],
-                    [1, 1],
-                    [2, 2]
-                ],
+                [1, 1],
                 6
             )
         })
@@ -324,12 +299,12 @@ mod tests {
         let obj = OBJECTS.get("alpha").unwrap();
         let coords = obj.coords.clone();
 
-        assert_eq!(coords, HashSet::from([[100, 200]]));
+        assert_eq!(coords, Some([100, 200]));
     }
 
     #[test]
     fn get_objects_without_data() {
         let obj = OBJECTS.get("delta").unwrap();
-        assert_eq!(obj.coords, HashSet::from([[0, 0], [1, 1], [2, 2]]));
+        assert_eq!(obj.coords, Some([1, 1]));
     }
 }
