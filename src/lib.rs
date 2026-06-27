@@ -6,7 +6,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::{LazyLock, OnceLock, RwLock};
 
-use pixen::Image;
+use pixen::*;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use serde_json::from_reader;
@@ -53,17 +53,19 @@ mod screen_objects {
 }
 
 static DATA_PATH: OnceLock<PathBuf> = OnceLock::new();
-static DATA: LazyLock<RwLock<HashMap<String, (Option<[u16; 2]>, u8)>>> = LazyLock::new(|| {
+static DATA: LazyLock<RwLock<HashMap<String, (Option<Point>, Option<Region>, u8)>>> = LazyLock::new(|| {
     let path = DATA_PATH.get().expect("DATA_PATH must be initialized");
 
     if !path.exists() {
-        fs::write(&path, "{}")
-            .expect(format!("Failed to write empty file {}", path.to_str().unwrap()).as_str());
+        return RwLock::new(HashMap::new());
     }
 
     let file = fs::File::open(&path).expect(format!("Failed to open file {}", path.display()).as_str());
 
-    let map = from_reader(file).expect(format!("Failed to parse JSON {}", path.display()).as_str());
+    let map = from_reader(file).unwrap_or_else(|_| {
+        fs::remove_file(path).expect(format!("failed to delete data-file {}.", path.display()).as_str());
+        HashMap::new()
+    });
 
     RwLock::new(map)
 });
@@ -101,11 +103,11 @@ fn get_objects(samples_dir: PathBuf) -> PyResult<HashMap<String, ScreenObject>> 
             .to_string();
 
         if !lock.contains_key(&name) {
-            lock.insert(name.clone(), (None, BASE_TOLERANCE));
+            lock.insert(name.clone(), (None, None, BASE_TOLERANCE));
         };
-        let (coords, tolerance) = lock.get(&name).unwrap().clone();
+        let (coords, region, tolerance) = lock.get(&name).unwrap().clone();
 
-        objects.insert(name, ScreenObject::new(file, coords, tolerance));
+        objects.insert(name, ScreenObject::new(file, coords, region, tolerance));
     }
     Ok(objects)
 }
@@ -115,16 +117,23 @@ struct ScreenObject {
     name: String,
     image: LazyLock<Image, Box<dyn FnOnce() -> Image + Send + Sync>>,
     coords: Option<[u16; 2]>,
+    region: Option<Region>,
     tolerance: u8,
 }
 
 #[pymethods]
 impl ScreenObject {
-    fn config(&self, fixed: bool) -> PyResult<()> {
+    #[pyo3(signature = (fixed = false, region = None))]
+    fn config(&self, fixed: bool, region: Option<&Self>) -> PyResult<()> {
         let screenshot = screen::get()?;
         let image = &self.image;
 
-        let (diff, coords) = pixen::get_tolerance(&*screenshot, image);
+        let region = region.map(|reg| get_region(&*screenshot, &reg.image));
+        let (tolerance, coords) = if let Some(region) = region {
+            get_tolerance_in_region(&screenshot, image, region)
+        } else {
+            get_tolerance(&screenshot, image)
+        };
 
         *DATA.write().unwrap().get_mut(&self.name).unwrap() = (
             if fixed {
@@ -132,10 +141,10 @@ impl ScreenObject {
             } else {
                 None
             },
-            diff + 1
+            region,
+            tolerance + 1
         );
-        save_data()?;
-        Ok(())
+        save_data()
     }
 
     fn exists(&self) -> PyResult<bool> {
@@ -169,7 +178,7 @@ impl ScreenObject {
     fn count(&self) -> PyResult<u16> {
         let screenshot = screen::get()?;
 
-        Ok(pixen::count(&*screenshot, &self.image, self.tolerance))
+        Ok(count(&*screenshot, &self.image, self.tolerance))
     }
 
     fn spam_tap(&self, n: u8, interval: f32) -> PyResult<bool> {
@@ -190,7 +199,7 @@ impl ScreenObject {
 }
 
 impl ScreenObject {
-    fn new(path: PathBuf, coords: Option<[u16; 2]>, tolerance: u8) -> Self {
+    fn new(path: PathBuf, coords: Option<Point>, region: Option<Region>, tolerance: u8) -> Self {
         let name = path.file_stem().unwrap().to_str().unwrap().to_string();
         Self {
             name,
@@ -198,14 +207,14 @@ impl ScreenObject {
                 let img = image::load(&path);
                 match img {
                     image::LoadResult::ImageU8(img) => Image::new(
-                        match img.depth {
+                        match img.depth.try_into().unwrap() {
                             screen::RGB_CHANNELS => img.data,
                             screen::RGBA_CHANNELS => rgba_into_rgb(img.data),
                             c => panic!("unknown number of channels: {}", c),
                         },
-                        img.width,
-                        img.height,
-                        screen::RGB_CHANNELS,
+                        img.width.try_into().unwrap(),
+                        img.height.try_into().unwrap(),
+                        screen::RGB_CHANNELS.try_into().unwrap(),
                     ).unwrap(),
                     image::LoadResult::ImageF32(_) => {
                         panic!("Unknown image format: {}", path.display())
@@ -214,6 +223,7 @@ impl ScreenObject {
                 }
             })),
             coords,
+            region,
             tolerance,
         }
     }
@@ -227,8 +237,15 @@ impl ScreenObject {
             }
         } else {
             let screenshot = screen::get()?;
+            let image = &self.image;
             let tolerance = self.tolerance;
-            Ok(pixen::find_best(&screenshot, &self.image, tolerance))
+            Ok(
+                if let Some(region) = self.region {
+                    find_in_region(&screenshot, image, region, tolerance)
+                } else {
+                    find_best(&screenshot, image, tolerance)
+                }
+            )
         }
     }
 
@@ -240,7 +257,13 @@ impl ScreenObject {
             let image = &self.image;
             let tolerance = self.tolerance;
 
-            Ok(pixen::matches(&*screenshot, image, tolerance))
+            Ok(
+                if let Some(region) = self.region {
+                    matches_in_region(&*screenshot, image, region, tolerance)
+                } else {
+                    matches(&screenshot, image, tolerance)
+                }
+            )
         }
     }
 
@@ -252,7 +275,13 @@ impl ScreenObject {
             let image = &self.image;
             let tolerance = self.tolerance;
 
-            Ok(pixen::find_nth(&*screenshot, image, tolerance, n))
+            Ok(
+                if let Some(region) = self.region {
+                    find_nth_in_region(&screenshot, image, region, tolerance, n)
+                } else {
+                    find_nth(&screenshot, image, tolerance, n)
+                }
+            )
         }
     }
 
@@ -262,7 +291,7 @@ impl ScreenObject {
         let image = &self.image;
         let tolerance = self.tolerance;
 
-        Ok(pixen::matches_at(&*screenshot, image, coords, tolerance))
+        Ok(matches_at(&*screenshot, image, coords, tolerance))
     }
 }
 
@@ -278,10 +307,12 @@ mod tests {
         json!({
             "alpha": (
                 [100, 200],
+                Value::Null,
                 5
             ),
             "delta": (
                 [1, 1],
+                Value::Null,
                 6
             )
         })
