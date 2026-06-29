@@ -139,7 +139,7 @@ fn get_objects(objects_dir: PathBuf, regions_dir: Option<PathBuf>) -> PyResult<H
                 if let Some(reg) = regs.get(&k).copied() {
                    Some(reg) 
                 } else {
-                    return Err(PyValueError::new_err(format!("There is not region called '{}'. existing regions: {:?}", k, regions.keys().collect::<Vec<_>>())))
+                    return Err(PyValueError::new_err(format!("There is not region called '{}'. existing regions: {:?}", k, regs.keys().collect::<Vec<_>>())))
                 }
             },
             (_, None) => None,
