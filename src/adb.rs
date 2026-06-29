@@ -127,7 +127,7 @@ fn connect(port: &str) -> PyResult<bool> {
 fn device_action(args: &[&str]) -> PyResult<Output> {
     let serial = DEVICE_SERIAL
         .get()
-        .expect("serial not set. call device_config() before using actions.");
+        .map_err(|_| PyValueError::new_err("serial not set. call device_config() before using actions."))?;
     let args = [&["-s", serial], args].concat();
     run(&args)
 }
