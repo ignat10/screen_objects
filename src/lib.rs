@@ -134,7 +134,7 @@ fn get_objects(objects_dir: PathBuf, regions_dir: Option<PathBuf>) -> PyResult<H
             objects_data.insert(name.clone(), (None, None, BASE_TOLERANCE));
         };
         let (coords, region_key, tolerance) = objects_data.get(&name).unwrap().clone();
-        let region = match (regions, region_key) {
+        let region = match (&regions, region_key) {
             (Some(regs), Some(k)) =>  {
                 if let Some(reg) = regs.get(&k).copied() {
                    Some(reg) 
