@@ -3,7 +3,7 @@ use std::io::{Write, stdin};
 use std::path::PathBuf;
 use std::process::{Command, Output};
 use std::sync::OnceLock;
-use pyo3::exceptions::{PyBufferError, PyOSError, PyRuntimeError};
+use pyo3::exceptions::{PyBufferError, PyOSError, PyRuntimeError, PyValueError};
 use pyo3::prelude::{PyResult, pyfunction};
 
 const ADB_PORT_LENGTH: usize = 5;
