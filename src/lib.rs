@@ -10,8 +10,8 @@ use pixen::*;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use serde_json::from_reader;
-use stb_image::image;
 use walkdir::WalkDir;
+use serde::de::DeserializeOwned;
 
 pub mod adb;
 pub mod screen;
@@ -30,6 +30,12 @@ mod screen_objects {
 
     #[pymodule_export]
     use ScreenObject;
+
+    #[pymodule_export]
+    use get_regions;
+
+    #[pymodule_export]
+    use ScreenRegion;
 
     #[pymodule_export]
     use adb::screenshot;
@@ -52,46 +58,65 @@ mod screen_objects {
     }
 }
 
-static DATA_PATH: OnceLock<PathBuf> = OnceLock::new();
-static DATA: LazyLock<RwLock<HashMap<String, (Option<Point>, Option<Region>, u8)>>> = LazyLock::new(|| {
-    let path = DATA_PATH.get().expect("DATA_PATH must be initialized");
-
-    if !path.exists() {
-        return RwLock::new(HashMap::new());
-    }
-
-    let file = fs::File::open(&path).expect(format!("Failed to open file {}", path.display()).as_str());
-
-    let map = from_reader(file).unwrap_or_else(|_| {
-        fs::remove_file(path).expect(format!("failed to delete data-file {}.", path.display()).as_str());
-        HashMap::new()
-    });
-
-    RwLock::new(map)
+static OBJECTS_PATH: OnceLock<PathBuf> = OnceLock::new();
+static OBJECTS_DATA: LazyLock<RwLock<HashMap<String, (Option<Point>, Option<String>, u8)>>> = LazyLock::new(|| {
+    let path = OBJECTS_PATH.get().expect("OBJECTS_PATH must be initialized");
+    load_data(path)
 });
 
-#[pyfunction]
-fn get_objects(samples_dir: PathBuf) -> PyResult<HashMap<String, ScreenObject>> {
-    let files = WalkDir::new(&samples_dir)
-        .into_iter()
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| PyRuntimeError::new_err(e.to_string()))?
-        .into_iter()
-        .filter(|entry| entry.file_type().is_file())
-        .map(|entry| entry.into_path());
+static REGIONS_PATH: OnceLock<PathBuf> = OnceLock::new();
+static REGIONS_DATA: LazyLock<RwLock<HashMap<String, Region>>> = LazyLock::new(|| {
+    let path = REGIONS_PATH.get().expect("REGIONS_PATH must be initialized");
+    load_data(path)
+});
 
-    DATA_PATH
-        .set(
-            samples_dir
-                .parent()
-                .unwrap()
-                .to_path_buf()
-                .join("objects_data.json"),
-        )
-        .map_err(|e| PyRuntimeError::new_err(e.to_string_lossy().into_owned()))?;
-    let mut lock = DATA
-        .write()
-        .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+fn load_data<T>(path: &PathBuf) -> RwLock<T>
+where
+    T: DeserializeOwned + Default,
+{
+    if !path.exists() {
+        return RwLock::new(T::default());
+    }
+    let file = fs::File::open(&path).expect(format!("Failed to open file {}", path.display()).as_str());
+    let map = from_reader(file)
+        .unwrap_or_else(|_| {
+            fs::remove_file(&path).expect(format!("failed to delete data-file {}.", path.display()).as_str());
+            T::default()
+        });
+    RwLock::new(map)
+}
+
+#[pyfunction]
+fn get_regions(regions_dir: PathBuf) -> PyResult<HashMap<String, ScreenRegion>> {
+    let parent = regions_dir.parent().unwrap();
+    REGIONS_PATH.set(parent.join("regions.json"))
+        .map_err(|_| PyRuntimeError::new_err("get_regions can be called only once!"))?;
+
+    Ok(
+        walk_dir(&regions_dir)?
+            .into_iter()
+            .map(|path| {
+                let name = path.file_name().unwrap().to_str().unwrap().to_string();
+                (name, ScreenRegion { path })
+            })
+            .collect()
+    )
+}
+
+#[pyfunction]
+#[pyo3(signature = (objects_dir, regions_dir = None))]
+fn get_objects(objects_dir: PathBuf, regions_dir: Option<PathBuf>) -> PyResult<HashMap<String, ScreenObject>> {
+    let files = walk_dir(&objects_dir)?;
+
+    let parent = objects_dir.parent().unwrap();
+    OBJECTS_PATH.set(parent.join("objects.json"))
+        .map_err(|_| PyValueError::new_err("get_objects can be called only once."))?;
+    let mut objects_data = OBJECTS_DATA.write().unwrap();
+
+    if let Some(dir) = regions_dir {
+        REGIONS_PATH.set(dir).unwrap();
+    }
+    let regions = REGIONS_DATA.read().unwrap();
 
     let mut objects = HashMap::new();
     for file in files {
@@ -102,20 +127,59 @@ fn get_objects(samples_dir: PathBuf) -> PyResult<HashMap<String, ScreenObject>> 
             .unwrap()
             .to_string();
 
-        if !lock.contains_key(&name) {
-            lock.insert(name.clone(), (None, None, BASE_TOLERANCE));
+        if !objects_data.contains_key(&name) {
+            objects_data.insert(name.clone(), (None, None, BASE_TOLERANCE));
         };
-        let (coords, region, tolerance) = lock.get(&name).unwrap().clone();
+        let (coords, region_key, tolerance) = objects_data.get(&name).unwrap().clone();
+        let region = region_key
+            .map(|k| {
+                regions
+                    .get(&k)
+                    .copied()
+                    .ok_or_else(|| PyValueError::new_err("Failed to retrieve data from regions"))
+            })
+            .transpose()?;
 
         objects.insert(name, ScreenObject::new(file, coords, region, tolerance));
     }
     Ok(objects)
 }
 
+fn walk_dir(root: &PathBuf) -> PyResult<impl Iterator<Item = PathBuf>> {
+    Ok(
+        WalkDir::new(root)
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))?
+            .into_iter()
+            .filter(|entry| entry.file_type().is_file())
+            .map(|entry| entry.into_path())
+    )
+}
+#[pyclass]
+struct ScreenRegion {
+    path: PathBuf,
+}
+
+#[pymethods]
+impl ScreenRegion {
+    fn calibrate(&self) -> PyResult<()> {
+        let screenshot = screen::get()?;
+        let image = load_image(&self.path)?;
+        let name = self.path.file_stem().unwrap().to_str().unwrap().to_string();
+        let region = get_region(&screenshot, &image);
+
+        REGIONS_DATA.write()
+            .unwrap()
+            .insert(name, region);
+        save_regions()
+    }
+}
+
 #[pyclass]
 struct ScreenObject {
-    name: String,
-    image: LazyLock<Image, Box<dyn FnOnce() -> Image + Send + Sync>>,
+    path: PathBuf,
+    image: OnceLock<PyResult<Image>>,
     coords: Option<[u16; 2]>,
     region: Option<Region>,
     tolerance: u8,
@@ -123,19 +187,18 @@ struct ScreenObject {
 
 #[pymethods]
 impl ScreenObject {
-    #[pyo3(signature = (fixed = false, region = None))]
-    fn config(&self, fixed: bool, region: Option<&Self>) -> PyResult<()> {
+    #[pyo3(signature = (fixed, region = None))]
+    fn calibrate(&self, fixed: bool, region: Option<String>) -> PyResult<()> {
         let screenshot = screen::get()?;
-        let image = &self.image;
+        let image = self.image()?;
 
-        let region = region.map(|reg| get_region(&*screenshot, &reg.image));
-        let (tolerance, coords) = if let Some(region) = region {
+        let (tolerance, coords) = if let Some(region) = self.region {
             get_tolerance_in_region(&screenshot, image, region)
         } else {
             get_tolerance(&screenshot, image)
         };
 
-        *DATA.write().unwrap().get_mut(&self.name).unwrap() = (
+        *OBJECTS_DATA.write().unwrap().get_mut(self.name()).unwrap() = (
             if fixed {
                 Some(coords)
             } else {
@@ -144,7 +207,7 @@ impl ScreenObject {
             region,
             tolerance + 1
         );
-        save_data()
+        save_objects()
     }
 
     fn exists(&self) -> PyResult<bool> {
@@ -153,7 +216,7 @@ impl ScreenObject {
 
     fn tap(&self) -> PyResult<bool> {
         if let Some(coords) = self.find_object()? {
-            let center = center_coords(coords, &self.image);
+            let center = center_coords(coords, self.image()?);
             Python::attach(|py| py.check_signals())?;
             adb::tap(center)?;
             screen::reset();
@@ -165,7 +228,7 @@ impl ScreenObject {
 
     fn tap_nth(&self, n: usize) -> PyResult<bool> {
         if let Some(coords) = self.find_nth(n)? {
-            let center = center_coords(coords, &self.image);
+            let center = center_coords(coords, self.image()?);
             Python::attach(|py| py.check_signals())?;
             adb::tap(center)?;
             screen::reset();
@@ -177,13 +240,14 @@ impl ScreenObject {
 
     fn count(&self) -> PyResult<u16> {
         let screenshot = screen::get()?;
+        let image = self.image()?;
 
-        Ok(count(&*screenshot, &self.image, self.tolerance))
+        Ok(count(&*screenshot, image, self.tolerance))
     }
 
     fn spam_tap(&self, n: u8, interval: f32) -> PyResult<bool> {
         if let Some(coords) = self.find_object()? {
-            let image = &self.image;
+            let image = self.image()?;
             let center = center_coords(coords, image);
             for _ in 0..n {
                 adb::tap(center)?;
@@ -200,28 +264,9 @@ impl ScreenObject {
 
 impl ScreenObject {
     fn new(path: PathBuf, coords: Option<Point>, region: Option<Region>, tolerance: u8) -> Self {
-        let name = path.file_stem().unwrap().to_str().unwrap().to_string();
         Self {
-            name,
-            image: LazyLock::new(Box::new(move || {
-                let img = image::load(&path);
-                match img {
-                    image::LoadResult::ImageU8(img) => Image::new(
-                        match img.depth.try_into().unwrap() {
-                            screen::RGB_CHANNELS => img.data,
-                            screen::RGBA_CHANNELS => rgba_into_rgb(img.data),
-                            c => panic!("unknown number of channels: {}", c),
-                        },
-                        img.width.try_into().unwrap(),
-                        img.height.try_into().unwrap(),
-                        screen::RGB_CHANNELS.try_into().unwrap(),
-                    ).unwrap(),
-                    image::LoadResult::ImageF32(_) => {
-                        panic!("Unknown image format: {}", path.display())
-                    }
-                    image::LoadResult::Error(e) => panic!("Failed to load image: {}", e),
-                }
-            })),
+            path,
+            image: OnceLock::new(),
             coords,
             region,
             tolerance,
@@ -237,7 +282,7 @@ impl ScreenObject {
             }
         } else {
             let screenshot = screen::get()?;
-            let image = &self.image;
+            let image = self.image()?;
             let tolerance = self.tolerance;
             Ok(
                 if let Some(region) = self.region {
@@ -254,7 +299,7 @@ impl ScreenObject {
             Ok(self.matches_at_coords()?)
         } else {
             let screenshot = screen::get()?;
-            let image = &self.image;
+            let image = self.image()?;
             let tolerance = self.tolerance;
 
             Ok(
@@ -269,10 +314,10 @@ impl ScreenObject {
 
     fn find_nth(&self, n: usize) -> PyResult<Option<[u16; 2]>> {
         if self.coords.is_some() {
-            Err(PyValueError::new_err(format!("Tried to find nth {}, but it has fixed coords.", self.name)))
+            Err(PyValueError::new_err(format!("Tried to find nth {}, but it has fixed coords.", self.name())))
         } else {
             let screenshot = screen::get()?;
-            let image = &self.image;
+            let image = self.image()?;
             let tolerance = self.tolerance;
 
             Ok(
@@ -286,12 +331,23 @@ impl ScreenObject {
     }
 
     fn matches_at_coords(&self) -> PyResult<bool> {
-        let coords = self.coords.ok_or(PyValueError::new_err(format!("Not found coords for {}.", self.name)))?;
+        let coords = self.coords.ok_or(PyValueError::new_err(format!("Not found coords for {}.", self.name())))?;
         let screenshot = screen::get()?;
-        let image = &self.image;
+        let image = self.image()?;
         let tolerance = self.tolerance;
 
         Ok(matches_at(&*screenshot, image, coords, tolerance))
+    }
+
+    fn image(&self) -> PyResult<&Image> {
+        self.image
+            .get_or_init(|| load_image(&self.path))
+            .as_ref()
+            .map_err(|e| PyValueError::new_err(e.to_string()))
+    }
+
+    fn name(&self) -> &str {
+        self.path.file_stem().unwrap().to_str().unwrap()
     }
 }
 
@@ -327,7 +383,7 @@ mod tests {
             to_string_pretty(&*DATA).unwrap(),
         )
         .unwrap();
-        get_objects(SAMPLES.path().to_path_buf()).unwrap()
+        get_objects(SAMPLES.path().to_path_buf(), None).unwrap()
     });
 
     #[test]
