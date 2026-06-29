@@ -187,7 +187,7 @@ struct ScreenObject {
 
 #[pymethods]
 impl ScreenObject {
-    #[pyo3(signature = (fixed, region = None))]
+    #[pyo3(signature = (fixed = false, region = None))]
     fn calibrate(&self, fixed: bool, region: Option<String>) -> PyResult<()> {
         let screenshot = screen::get()?;
         let image = self.image()?;
