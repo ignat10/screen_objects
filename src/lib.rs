@@ -136,7 +136,7 @@ fn get_objects(objects_dir: PathBuf, regions_dir: Option<PathBuf>) -> PyResult<H
                 regions
                     .get(&k)
                     .copied()
-                    .ok_or_else(|| PyValueError::new_err("Failed to retrieve data from regions"))
+                    .ok_or_else(|| PyValueError::new_err(format!("There is not region called {}. existing regions: {:?}", k, regions.unwrap().keys().collect::<Vec<_>>())))
             })
             .transpose()?;
 
