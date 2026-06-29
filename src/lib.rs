@@ -115,7 +115,7 @@ fn get_objects(objects_dir: PathBuf, regions_dir: Option<PathBuf>) -> PyResult<H
 
     let regions = if let Some(dir) = regions_dir {
         let parent = dir.parent().unwrap();
-        REGIONS_PATH.set(dir.join("regions.json")).unwrap();
+        REGIONS_PATH.set(parent.join("regions.json")).unwrap();
         Some(REGIONS_DATA.read().unwrap())
     } else {
         None
