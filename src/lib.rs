@@ -113,10 +113,13 @@ fn get_objects(objects_dir: PathBuf, regions_dir: Option<PathBuf>) -> PyResult<H
         .map_err(|_| PyValueError::new_err("get_objects can be called only once."))?;
     let mut objects_data = OBJECTS_DATA.write().unwrap();
 
-    if let Some(dir) = regions_dir {
+    let regions = if let Some(dir) = regions_dir {
+        let parent = dir.parent().unwrap();
         REGIONS_PATH.set(dir.join("regions.json")).unwrap();
-    }
-    let regions = REGIONS_DATA.read().unwrap();
+        Some(REGIONS_DATA.read().unwrap())
+    } else {
+        None
+    };
 
     let mut objects = HashMap::new();
     for file in files {
@@ -131,14 +134,17 @@ fn get_objects(objects_dir: PathBuf, regions_dir: Option<PathBuf>) -> PyResult<H
             objects_data.insert(name.clone(), (None, None, BASE_TOLERANCE));
         };
         let (coords, region_key, tolerance) = objects_data.get(&name).unwrap().clone();
-        let region = region_key
-            .map(|k| {
-                regions
-                    .get(&k)
-                    .copied()
-                    .ok_or_else(|| PyValueError::new_err(format!("There is not region called {}. existing regions: {:?}", k, regions.keys().collect::<Vec<_>>())))
-            })
-            .transpose()?;
+        let region = match (regions, region_key) {
+            (Some(regs), Some(k)) =>  {
+                if let Some(reg) = regs.get(&k).copied() {
+                   Some(reg) 
+                } else {
+                    return Err(PyValueError::new_err(format!("There is not region called '{}'. existing regions: {:?}", k, regions.keys().collect::<Vec<_>>())))
+                }
+            },
+            (_, None) => None,
+            (None, Some(k)) => return Err(PyValueError::new_err(format!("called region {}, but there is no regions loaded", k))),
+        };
 
         objects.insert(name, ScreenObject::new(file, coords, region, tolerance));
     }
