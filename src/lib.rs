@@ -96,7 +96,7 @@ fn get_regions(regions_dir: PathBuf) -> PyResult<HashMap<String, ScreenRegion>> 
         walk_dir(&regions_dir)?
             .into_iter()
             .map(|path| {
-                let name = path.file_name().unwrap().to_str().unwrap().to_string();
+                let name = path.file_stem().unwrap().to_str().unwrap().to_string();
                 (name, ScreenRegion { path })
             })
             .collect()
