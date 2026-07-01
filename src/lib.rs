@@ -195,15 +195,16 @@ struct ScreenObject {
 
 #[pymethods]
 impl ScreenObject {
-    #[pyo3(signature = (fixed = false, region = None))]
-    fn calibrate(&self, fixed: bool, region: Option<String>) -> PyResult<()> {
+    #[pyo3(signature = (fixed = false, region = None, n = None))]
+    fn calibrate(&self, fixed: bool, region: Option<String>, n: Option<usize>) -> PyResult<()> {
         let screenshot = screen::get()?;
         let image = self.image()?;
 
-        let (tolerance, coords) = if let Some(region) = self.region {
-            get_tolerance_in_region(&screenshot, image, region)
-        } else {
-            get_tolerance(&screenshot, image)
+        let (tolerance, coords) = match (self.region, n) {
+            (Some(region), Some(n)) => get_nth_tolerance_in_region(&screenshot, image, region, n),
+            (Some(region), None) => get_tolerance_in_region(&screenshot, image, region),
+            (None, Some(n)) => get_nth_tolerance(&screenshot, image, n),
+            (None, None) => get_tolerance(&screenshot, image)
         };
 
         *OBJECTS_DATA.write().unwrap().get_mut(self.name()).unwrap() = (
@@ -246,7 +247,7 @@ impl ScreenObject {
         }
     }
 
-    fn count(&self) -> PyResult<u16> {
+    fn count(&self) -> PyResult<usize> {
         let screenshot = screen::get()?;
         let image = self.image()?;
 
