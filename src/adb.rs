@@ -6,6 +6,8 @@ use std::sync::OnceLock;
 use pyo3::exceptions::{PyBufferError, PyOSError, PyRuntimeError, PyValueError};
 use pyo3::prelude::{PyResult, pyfunction};
 
+use crate::Coords;
+
 const ADB_PORT_LENGTH: usize = 5;
 
 static ADB: OnceLock<PathBuf> = OnceLock::new();
@@ -46,6 +48,20 @@ pub(super) fn tap(coords: [u16; 2]) -> PyResult<()> {
         "tap",
         &coords[0].to_string(),
         &coords[1].to_string(),
+    ])
+        .map(|_| ())
+}
+
+pub(super) fn swipe(start: Coords, end: Coords, time: u16) -> PyResult<()> {
+    device_action(&[
+        "shell",
+        "input",
+        "swipe",
+        &start[0].to_string(),
+        &start[1].to_string(),
+        &end[0].to_string(),
+        &end[1].to_string(),
+        &time.to_string(),
     ])
         .map(|_| ())
 }

@@ -19,6 +19,7 @@ pub mod utils;
 
 use utils::*;
 
+pub(crate) type Coords = Point;
 const BASE_TOLERANCE: u8 = 5;
 
 #[pymodule]
@@ -55,6 +56,19 @@ mod screen_objects {
         adb::back()?;
         screen::reset();
         Ok(())
+    }
+    
+    #[pyfunction]
+    fn swipe(start: &ScreenObject, end: &ScreenObject, duration: u16) -> PyResult<bool> {
+        let start_coords = start.find_object()?;
+        let end_coords = end.find_object()?;
+        
+        if let Some(start_coords) = start_coords && let Some(end_coords) = end_coords {
+            adb::swipe(start_coords, end_coords, duration)?;
+            Ok(true)
+        } else { 
+            Ok(false)
+        }
     }
 }
 
