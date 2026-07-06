@@ -264,8 +264,15 @@ impl ScreenObject {
     fn count(&self) -> PyResult<usize> {
         let screenshot = screen::get()?;
         let image = self.image()?;
+        let tolerance = self.tolerance;
 
-        Ok(count(&*screenshot, image, self.tolerance))
+        Ok(
+            if let Some(region) = self.region {
+                count_in_region(&*screenshot, image, region, tolerance)
+            } else {
+                count(&*screenshot, image, tolerance)
+            }
+        )
     }
 
     fn spam_tap(&self, n: u8, interval: f32) -> PyResult<bool> {
