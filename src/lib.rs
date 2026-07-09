@@ -283,6 +283,12 @@ impl ScreenObject {
             Ok(false)
         }
     }
+
+    fn debug(&self, point: Point) -> PyResult<()> {
+        let screenshot = screen::get()?;
+        println!("{:?}", debug_match(&screenshot, self.image()?, point));
+        Ok(())
+    }
 }
 
 impl ScreenObject {
