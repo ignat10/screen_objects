@@ -1,7 +1,7 @@
 #![feature(mapped_lock_guards)]
 #![feature(iter_array_chunks)]
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{LazyLock, OnceLock, RwLock};
@@ -120,7 +120,13 @@ fn get_regions(regions_dir: PathBuf) -> PyResult<HashMap<String, ScreenRegion>> 
 #[pyfunction]
 #[pyo3(signature = (objects_dir, regions_dir = None))]
 fn get_objects(objects_dir: PathBuf, regions_dir: Option<PathBuf>) -> PyResult<HashMap<String, ScreenObject>> {
-    let files = walk_dir(&objects_dir)?;
+    let files: Vec<PathBuf> = walk_dir(&objects_dir)?.collect();
+    let mut seen_files = HashSet::new();
+    for file in &files {
+        if !seen_files.insert(file) {
+            return Err(PyValueError::new_err(format!("duplicate object path: {}", file.display())));
+        }
+    }
 
     let parent = objects_dir.parent().unwrap();
     OBJECTS_PATH.set(parent.join("objects.json"))
