@@ -122,8 +122,8 @@ fn get_regions(regions_dir: PathBuf) -> PyResult<HashMap<String, ScreenRegion>> 
 fn get_objects(objects_dir: PathBuf, regions_dir: Option<PathBuf>) -> PyResult<HashMap<String, ScreenObject>> {
     let files: Vec<PathBuf> = walk_dir(&objects_dir)?.collect();
     let mut seen_files = HashSet::new();
-    for file in &files {
-        if !seen_files.insert(file) {
+    for file in files.iter().map(|p| p.file_stem().unwrap().to_owned()) {
+        if !seen_files.insert(file.clone()) {
             return Err(PyValueError::new_err(format!("duplicate object path: {}", file.display())));
         }
     }
