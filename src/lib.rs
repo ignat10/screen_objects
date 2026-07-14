@@ -57,19 +57,12 @@ mod screen_objects {
         screen::reset();
         Ok(())
     }
-    
-    #[pyfunction]
-    fn swipe(start: &ScreenObject, end: &ScreenObject, duration: u16) -> PyResult<bool> {
-        let start_coords = start.find_object()?;
-        let end_coords = end.find_object()?;
-        
-        if let Some(start_coords) = start_coords && let Some(end_coords) = end_coords {
-            adb::swipe(start_coords, end_coords, duration)?;
-            Ok(true)
-        } else { 
-            Ok(false)
-        }
-    }
+
+    #[pymodule_export]
+    use Direction;
+
+    #[pymodule_export]
+    use SwipeSpeed;
 }
 
 static OBJECTS_PATH: OnceLock<PathBuf> = OnceLock::new();
@@ -104,7 +97,7 @@ where
 fn get_regions(regions_dir: PathBuf) -> PyResult<HashMap<String, ScreenRegion>> {
     let parent = regions_dir.parent().unwrap();
     REGIONS_PATH.set(parent.join("regions.json"))
-        .map_err(|_| PyRuntimeError::new_err("get_regions can be called only once!"))?;
+        .map_err(|_| PyRuntimeError::new_err("get_regions can be called after get_objects!"))?;
 
     Ok(
         walk_dir(&regions_dir)?
@@ -255,6 +248,18 @@ impl ScreenObject {
         }
     }
 
+    fn swipe(&self, dir: Direction, speed: SwipeSpeed, duration: f32) -> PyResult<bool> {
+        if let Some(start) = self.find_object()? {
+            let distance = (speed.pixels_per_second() * duration) as u16;
+            let end = dir.destination(start, distance);
+            let time = (duration * 1000.0) as u16;
+            adb::swipe(start, end, time)
+                .map(|()| true)
+        } else {
+            Ok(false)
+        }
+    }
+
     fn tap_nth(&self, n: usize) -> PyResult<bool> {
         if let Some(coords) = self.find_nth(n)? {
             let center = center_coords(coords, self.image()?);
@@ -304,6 +309,48 @@ impl ScreenObject {
     }
 }
 
+#[pyclass(from_py_object)]
+#[derive(Copy, Clone)]
+enum Direction {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+impl Direction {
+    fn destination(&self, mut coords: Coords, distance: u16) -> Coords {
+        let [w, h] = adb::DIMENSIONS.get().unwrap().clone();
+        match self {
+            Direction::Left => coords[0] = coords[0].saturating_sub(distance),
+            Direction::Right => coords[0] = coords[0].saturating_add(distance).min(w),
+            Direction::Up => coords[1] = coords[1].saturating_sub(distance),
+            Direction::Down => coords[1] = coords[1].saturating_add(distance).min(h),
+        }
+        coords
+    }
+}
+
+#[pyclass(from_py_object)]
+#[derive(Clone, Copy)]
+enum SwipeSpeed {
+    Slow,
+    Normal,
+    Fast,
+    Turbo,
+}
+
+impl SwipeSpeed {
+    const fn pixels_per_second(&self) -> f32 {
+        match self {
+            SwipeSpeed::Slow => 320.0,
+            SwipeSpeed::Normal => 640.0,
+            SwipeSpeed::Fast => 1280.0,
+            SwipeSpeed::Turbo => 2560.0,
+        }
+    }
+}
+
 impl ScreenObject {
     fn new(path: PathBuf, coords: Option<Point>, region: Option<Region>, tolerance: u8) -> Self {
         Self {
@@ -315,7 +362,7 @@ impl ScreenObject {
         }
     }
 
-    fn find_object(&self) -> PyResult<Option<[u16; 2]>> {
+    fn find_object(&self) -> PyResult<Option<Coords>> {
         if self.coords.is_some() {
             if self.matches_at_coords()? {
                 Ok(self.coords)

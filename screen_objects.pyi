@@ -1,11 +1,24 @@
 from pathlib import Path
+from enum import Enum, auto
 
+class Direction(Enum):
+    Left = auto()
+    Right = auto()
+    Down = auto()
+    Up = auto()
 
+class SwipeSpeed(Enum):
+    Slow = auto()
+    Normal = auto()
+    Fast = auto()
+    Turbo = auto()
 
 class ScreenObject:
     def exists(self) -> bool: ...
 
     def tap(self) -> bool: ...
+
+    def swipe(self, dir: Direction, speed: SwipeSpeed, duration: float) -> bool: ...
     
     def tap_nth(self, n: int) -> bool: ...
     
@@ -16,8 +29,6 @@ class ScreenObject:
     def calibrate(self, fixed: bool=False, region: str | None=None, n: int | None=None) -> None: ...
 
 def get_objects(samples_dir: Path, regions_dir: Path | None = None) -> dict[str, ScreenObject]: ...
-
-def swipe(start: ScreenObject, end: ScreenObject, duration: int) -> bool: ...
 
 class ScreenRegion:
     def calibrate(self) -> None: ...

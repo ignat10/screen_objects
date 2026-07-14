@@ -13,12 +13,14 @@ const ADB_PORT_LENGTH: usize = 5;
 static ADB: OnceLock<PathBuf> = OnceLock::new();
 static DEVICE_SERIAL: OnceLock<String> = OnceLock::new();
 
+pub(crate) static DIMENSIONS: OnceLock<Coords> = OnceLock::new();
+
 pub(super) fn device_config(adb: PathBuf, ip: Option<String>) -> PyResult<()> {
     println!("connecting adb device...");
     ADB.set(adb)
         .map_err(|_| PyRuntimeError::new_err("device_config function can only be called once."))?;
 
-    let mut serial: Option<String> = scan()?;
+    let mut serial = scan()?;
 
     if let Some(ip) = ip {
         while serial.is_none() {
@@ -38,10 +40,30 @@ pub(super) fn device_config(adb: PathBuf, ip: Option<String>) -> PyResult<()> {
     DEVICE_SERIAL.set(serial.unwrap())
         .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
     println!("device connected");
-    Ok(())
+    
+    let size = size()?;
+    DIMENSIONS.set(size)
+        .map_err(|_| PyRuntimeError::new_err("device_config function can only be called once."))
+
 }
 
-pub(super) fn tap(coords: [u16; 2]) -> PyResult<()> {
+fn size() -> PyResult<Coords> {
+    let output = device_action(&["shell", "wm", "size"])?.stdout;
+    let size_str = String::from_utf8_lossy(&output);
+
+    let size_part = size_str
+        .split_whitespace()
+        .last()
+        .unwrap();
+
+    size_part.split('x')
+        .map(|s| s.parse::<u16>().unwrap())
+        .collect::<Vec<u16>>()
+        .try_into()
+        .map_err(|_| PyValueError::new_err(format!("Failed to get size from output: {}", size_str)))
+}
+
+pub(super) fn tap(coords: Coords) -> PyResult<()> {
     device_action(&[
         "shell",
         "input",
