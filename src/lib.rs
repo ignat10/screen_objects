@@ -305,8 +305,8 @@ impl ScreenObject {
     }
     
     fn wait(&self) -> PyResult<()> {
-        while self.exists()? {
-            sleep(Duration::from_millis(200))
+        while !self.exists()? {
+            Python::attach(|py| py.check_signals())?;
         }
         Ok(())
     }
