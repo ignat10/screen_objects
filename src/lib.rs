@@ -1,6 +1,8 @@
 #![feature(mapped_lock_guards)]
 #![feature(iter_array_chunks)]
 
+use std::thread::sleep;
+use std::time::Duration;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
@@ -300,6 +302,13 @@ impl ScreenObject {
         } else {
             Ok(false)
         }
+    }
+    
+    fn wait(&self) -> PyResult<()> {
+        while self.exists()? {
+            sleep(Duration::from_millis(200))
+        }
+        Ok(())
     }
 
     fn debug(&self, point: Point) -> PyResult<()> {

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::process::{Command, Output};
 use std::sync::OnceLock;
 use pyo3::exceptions::{PyBufferError, PyOSError, PyRuntimeError, PyValueError};
-use pyo3::prelude::{PyResult, pyfunction};
+use pyo3::prelude::{PyResult, pyfunction, Python};
 
 use crate::Coords;
 
@@ -22,17 +22,14 @@ pub(super) fn device_config(adb: PathBuf, ip: Option<String>) -> PyResult<()> {
 
     let mut serial = scan()?;
 
-    if let Some(ip) = ip {
-        while serial.is_none() {
+    while serial.is_none() {
+        Python::attach(|py| py.check_signals())?;
+        if let Some(ip) = ip.clone() {
             let port = input_port()?;
             if let Some(port) = port {
                 connect(&format!("{}:{}", ip, port))?;
             }
 
-            serial = scan()?;
-        }
-    } else {
-        while serial.is_none() {
             serial = scan()?;
         }
     }
