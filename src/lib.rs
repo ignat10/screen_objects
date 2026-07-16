@@ -241,13 +241,20 @@ impl ScreenObject {
     fn tap(&self) -> PyResult<bool> {
         if let Some(coords) = self.find_object()? {
             let center = center_coords(coords, self.image()?);
-            Python::attach(|py| py.check_signals())?;
+            check_python_signals()?;
             adb::tap(center)?;
             screen::reset();
             Ok(true)
         } else {
             Ok(false)
         }
+    }
+
+    fn waitap(&self) -> PyResult<()> {
+        while !self.tap()? {
+            check_python_signals()?;
+        }
+        Ok(())
     }
 
     fn swipe(&self, dir: Direction, speed: SwipeSpeed, duration: f32) -> PyResult<bool> {
@@ -265,7 +272,7 @@ impl ScreenObject {
     fn tap_nth(&self, n: usize) -> PyResult<bool> {
         if let Some(coords) = self.find_nth(n)? {
             let center = center_coords(coords, self.image()?);
-            Python::attach(|py| py.check_signals())?;
+            check_python_signals()?;
             adb::tap(center)?;
             screen::reset();
             Ok(true)
@@ -295,7 +302,7 @@ impl ScreenObject {
             for _ in 0..n {
                 adb::tap(center)?;
                 std::thread::sleep(std::time::Duration::from_secs_f32(interval));
-                Python::attach(|py| py.check_signals())?;
+                check_python_signals()?;
             }
             screen::reset();
             Ok(true)
@@ -316,6 +323,10 @@ impl ScreenObject {
         println!("{:?}", debug_match(&screenshot, self.image()?, point));
         Ok(())
     }
+}
+
+fn check_python_signals() -> PyResult<()> {
+    Python::attach(|py| py.check_signals())
 }
 
 #[pyclass(from_py_object)]
