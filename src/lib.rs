@@ -1,8 +1,6 @@
 #![feature(mapped_lock_guards)]
 #![feature(iter_array_chunks)]
 
-use std::thread::sleep;
-use std::time::Duration;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
@@ -253,6 +251,7 @@ impl ScreenObject {
     fn waitap(&self) -> PyResult<()> {
         while !self.tap()? {
             check_python_signals()?;
+            screen::reset();
         }
         Ok(())
     }
@@ -312,8 +311,9 @@ impl ScreenObject {
     }
     
     fn wait(&self) -> PyResult<()> {
-        while self.exists()? {
-            sleep(Duration::from_millis(200))
+        while !self.exists()? {
+            check_python_signals()?;
+            screen::reset();
         }
         Ok(())
     }
