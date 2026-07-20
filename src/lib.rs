@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{LazyLock, OnceLock, RwLock};
+use std::time::{Instant, Duration};
 
 use pixen::*;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
@@ -21,6 +22,7 @@ use utils::*;
 
 pub(crate) type Coords = Point;
 const BASE_TOLERANCE: u8 = 5;
+const MINUTE: f32 = 60.0;
 
 #[pymodule]
 mod screen_objects {
@@ -248,12 +250,13 @@ impl ScreenObject {
         }
     }
 
-    fn waitap(&self) -> PyResult<()> {
-        while !self.tap()? {
-            check_python_signals()?;
-            screen::reset();
+    #[pyo3(signature = (timeout = MINUTE))]
+    fn waitap(&self, timeout: f32) -> PyResult<bool> {
+        if self.wait(timeout)? {
+            self.tap()
+        } else {
+            Ok(false)
         }
-        Ok(())
     }
 
     fn swipe(&self, dir: Direction, speed: SwipeSpeed, duration: f32) -> PyResult<bool> {
@@ -300,7 +303,7 @@ impl ScreenObject {
             let center = center_coords(coords, image);
             for _ in 0..n {
                 adb::tap(center)?;
-                std::thread::sleep(std::time::Duration::from_secs_f32(interval));
+                std::thread::sleep(Duration::from_secs_f32(interval));
                 check_python_signals()?;
             }
             screen::reset();
@@ -309,13 +312,19 @@ impl ScreenObject {
             Ok(false)
         }
     }
-    
-    fn wait(&self) -> PyResult<()> {
+
+    #[pyo3(signature = (timeout = MINUTE))]
+    fn wait(&self, timeout: f32) -> PyResult<bool> {
+        let timeout = Duration::from_secs_f32(timeout);
+        let start = Instant::now();
         while !self.exists()? {
+            if start.elapsed() > timeout {
+                return Ok(false);
+            }
             check_python_signals()?;
             screen::reset();
         }
-        Ok(())
+        Ok(true)
     }
 
     fn debug(&self, point: Point) -> PyResult<()> {
