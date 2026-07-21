@@ -7,7 +7,7 @@ use pyo3::exceptions::{PyBufferError, PyRuntimeError};
 use stb_image::image;
 use fastrand::u16;
 
-use crate::{OBJECTS_DATA, OBJECTS_PATH, REGIONS_DATA, REGIONS_PATH};
+use crate::{Coords, OBJECTS_DATA, OBJECTS_PATH, REGIONS_DATA, REGIONS_PATH};
 use crate::screen::{RGB_CHANNELS, RGBA_CHANNELS};
 
 pub(crate) fn rgba_into_rgb(rgba: Vec<u8>) -> Vec<u8> {
@@ -59,7 +59,7 @@ pub(super) fn load_image(path: &PathBuf) -> PyResult<Image> {
     }
 }
 
-pub(super) fn center_coords(top_left: Point, img: &Image) -> Point {
+pub(super) fn center_coords(top_left: Point, img: &Image) -> Coords {
     let w = img.width();
     let h = img.height();
     let w_quarter = w / 4;

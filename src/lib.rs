@@ -229,7 +229,7 @@ impl ScreenObject {
                 None
             },
             region,
-            tolerance + 1
+            tolerance + BASE_TOLERANCE
         );
         save_objects()
     }
@@ -295,6 +295,24 @@ impl ScreenObject {
                 count(&*screenshot, image, tolerance)
             }
         )
+    }
+
+    fn tap_each(&self) -> PyResult<()> {
+        let screenshot = screen::get()?;
+        let image = self.image()?;
+        let tolerance = self.tolerance;
+        let coords = if let Some(region) = self.region {
+            find_all_in_region(&screenshot, image, region, tolerance)
+        } else {
+            find_all(&screenshot, image, tolerance)
+        };
+        for coord in coords {
+            let center = center_coords(coord, image);
+            check_python_signals()?;
+            adb::tap(center)?;
+        }
+        screen::reset();
+        Ok(())
     }
 
     fn spam_tap(&self, n: u8, interval: f32) -> PyResult<bool> {
