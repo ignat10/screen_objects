@@ -60,6 +60,13 @@ mod screen_objects {
         Ok(())
     }
 
+    #[pyfunction]
+    fn home() -> PyResult<()> {
+        adb::home()?;
+        screen::reset();
+        Ok(())
+    }
+
     #[pymodule_export]
     use Direction;
 

@@ -112,6 +112,10 @@ pub(crate) fn back() -> PyResult<()> {
     device_action(&["shell", "input", "keyevent", "4"]).map(|_| ())
 }
 
+pub(crate) fn home() -> PyResult<()> {
+    device_action(&["shell", "input", "keyevent", "3"]).map(|_| ())
+}
+
 fn scan() -> PyResult<Option<String>> {
     let raw_output = run(&["devices"])?.stdout;
     let text_output = String::from_utf8_lossy(&raw_output).into_owned();

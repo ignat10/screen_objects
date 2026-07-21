@@ -130,6 +130,7 @@ device_config(adb: Path, ip: str | None) -> None
 reset_screen() -> None
 screenshot() -> None
 back() -> None
+home() -> None
 ```
 
 `screenshot()` writes the current device screenshot to `screen.png`.
@@ -137,6 +138,8 @@ back() -> None
 `reset_screen()` clears the cached screenshot so the next lookup captures a fresh screen.
 
 `back()` sends Android's back key event and resets the screenshot cache.
+
+`home()` sends Android's home key event and resets the screenshot cache.
 
 ### ScreenObject
 
@@ -190,4 +193,3 @@ maturin develop
 ```
 
 The release workflow builds wheels on tagged pushes matching `v*`.
-
