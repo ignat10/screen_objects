@@ -318,6 +318,7 @@ impl ScreenObject {
             check_python_signals()?;
             adb::tap(center)?;
         }
+        drop(screenshot);
         screen::reset();
         Ok(())
     }
