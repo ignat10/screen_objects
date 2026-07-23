@@ -128,6 +128,7 @@ get_objects(objects_dir: Path, regions_dir: Path | None = None) -> dict[str, Scr
 get_regions(regions_dir: Path) -> dict[str, ScreenRegion]
 device_config(adb: Path, ip: str | None) -> None
 reset_screen() -> None
+tap_center() -> None
 screenshot() -> None
 back() -> None
 home() -> None
@@ -136,6 +137,8 @@ home() -> None
 `screenshot()` writes the current device screenshot to `screen.png`.
 
 `reset_screen()` clears the cached screenshot so the next lookup captures a fresh screen.
+
+`tap_center()` taps the center of the configured Android device screen and resets the screenshot cache.
 
 `back()` sends Android's back key event and resets the screenshot cache.
 
