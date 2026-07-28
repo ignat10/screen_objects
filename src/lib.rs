@@ -59,10 +59,14 @@ mod screen_objects {
         Ok(())
     }
 
-    #[pyfunction]
-    fn device_config(adb: PathBuf, ip: Option<String>) -> PyResult<()> {
-        adb::device_config(adb, ip)
-    }
+    #[pymodule_export]
+    use adb::device_config;
+
+    #[pymodule_export]
+    use adb::start_app;
+
+    #[pymodule_export]
+    use adb::close_app;
 
     #[pyfunction]
     fn back() -> PyResult<()> {
@@ -146,7 +150,7 @@ fn get_objects(
     for file in files.iter().map(|p| p.file_stem().unwrap().to_owned()) {
         if !seen_files.insert(file.clone()) {
             return Err(PyValueError::new_err(format!(
-                "duplicate object path: {}",
+                "duplicate object names: {}",
                 file.display()
             )));
         }

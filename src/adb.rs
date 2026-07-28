@@ -12,10 +12,12 @@ const ADB_PORT_LENGTH: usize = 5;
 
 static ADB: OnceLock<PathBuf> = OnceLock::new();
 static DEVICE_SERIAL: OnceLock<String> = OnceLock::new();
-
+static APP: OnceLock<String> = OnceLock::new();
 pub(crate) static DIMENSIONS: OnceLock<Coords> = OnceLock::new();
 
-pub(super) fn device_config(adb: PathBuf, ip: Option<String>) -> PyResult<()> {
+#[pyfunction]
+#[pyo3(signature = (adb = PathBuf::from("adb"), ip = None, app = None))]
+pub(super) fn device_config(adb: PathBuf, ip: Option<String>, app: Option<String>) -> PyResult<()> {
     println!("connecting adb device...");
     ADB.set(adb)
         .map_err(|_| PyRuntimeError::new_err("device_config function can only be called once."))?;
@@ -43,6 +45,12 @@ pub(super) fn device_config(adb: PathBuf, ip: Option<String>) -> PyResult<()> {
     DIMENSIONS
         .set(size)
         .map_err(|_| PyRuntimeError::new_err("device_config function can only be called once."))
+        ?;
+    if let Some(a) = app {
+        let package = find_package(a)?;
+        APP.set(package).unwrap();
+    }
+    Ok(())
 }
 
 fn size() -> PyResult<Coords> {
@@ -57,6 +65,38 @@ fn size() -> PyResult<Coords> {
         .collect::<Vec<u16>>()
         .try_into()
         .map_err(|_| PyValueError::new_err(format!("Failed to get size from output: {}", size_str)))
+}
+
+fn find_package(name: String) -> PyResult<String> {
+    let output = device_action(&["shell", "pm", "list", "packages"])?;
+    let packages = String::from_utf8_lossy(&output.stdout);
+    for line in packages.lines() {
+        let package = line.strip_prefix("package:")
+            .ok_or_else(|| PyBufferError::new_err("line is not starting with package: "))
+            ?;
+        if package.contains(&name) {
+            return Ok(package.into());
+        }
+    }
+    Err(PyValueError::new_err(format!("Package '{}' not found", name)))
+}
+
+#[pyfunction]
+pub(super) fn start_app() -> PyResult<()> {
+    let name = APP.get()
+        .ok_or_else(|| PyValueError::new_err("App name not set. Call device_config with app argument before this function."))
+        ?;
+    device_action(&["shell", "monkey", "-p", name, "1"])
+        .map(|_| ())
+}
+
+#[pyfunction]
+pub(super) fn close_app() -> PyResult<()> {
+    let name = APP.get()
+        .ok_or_else(|| PyValueError::new_err("App name not set. Call device_config with app argument before this function."))
+        ?;
+    device_action(&["shell", "am", "force-stop", name])
+        .map(|_| ())
 }
 
 pub(super) fn tap(coords: Coords) -> PyResult<()> {
