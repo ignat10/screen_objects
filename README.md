@@ -129,6 +129,7 @@ get_regions(regions_dir: Path) -> dict[str, ScreenRegion]
 device_config(adb: Path, ip: str | None) -> None
 reset_screen() -> None
 tap_center() -> None
+swipe_center(dir: Direction, speed: SwipeSpeed, duration: float) -> None
 screenshot() -> None
 back() -> None
 home() -> None
@@ -139,6 +140,8 @@ home() -> None
 `reset_screen()` clears the cached screenshot so the next lookup captures a fresh screen.
 
 `tap_center()` taps the center of the configured Android device screen and resets the screenshot cache.
+
+`swipe_center()` swipes from the center of the configured Android device screen in the requested direction and resets the screenshot cache.
 
 `back()` sends Android's back key event and resets the screenshot cache.
 

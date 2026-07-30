@@ -59,6 +59,21 @@ mod screen_objects {
         Ok(())
     }
 
+    #[pyfunction]
+    fn swipe_center(dir: Direction, speed: SwipeSpeed, duration: f32) -> PyResult<()> {
+        let [w, h] = adb::DIMENSIONS.get().copied().ok_or_else(|| {
+            PyRuntimeError::new_err("device_config must be called before swipe_center")
+        })?;
+
+        let start = [w / 2, h / 2];
+        let distance = (speed.pixels_per_second() * duration) as u16;
+        let end = dir.destination(start, distance);
+        let time = (duration * 1000.0) as u16;
+        adb::swipe(start, end, time)?;
+        screen::reset();
+        Ok(())
+    }
+
     #[pymodule_export]
     use adb::device_config;
 
