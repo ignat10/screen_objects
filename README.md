@@ -10,6 +10,7 @@ The project is built with [PyO3](https://pyo3.rs/) and [maturin](https://www.mat
 - Detect whether an object exists on the Android screen.
 - Tap, repeated-tap, tap every match, or tap the nth match.
 - Wait for an object to appear and tap it.
+- Raise an error and save a diagnostic screenshot when a required object is not found.
 - Swipe from a detected object in a chosen direction and speed.
 - Calibrate objects and optional screen regions.
 - Cache screenshots until an action changes the screen.
@@ -126,7 +127,9 @@ objects["reward_badge"].calibrate(region="main_panel")
 ```python
 get_objects(objects_dir: Path, regions_dir: Path | None = None) -> dict[str, ScreenObject]
 get_regions(regions_dir: Path) -> dict[str, ScreenRegion]
-device_config(adb: Path, ip: str | None) -> None
+device_config(adb: Path = Path("adb"), ip: str | None = None, app: str | None = None) -> None
+start_app() -> None
+close_app() -> None
 reset_screen() -> None
 tap_center() -> None
 swipe_center(dir: Direction, speed: SwipeSpeed, duration: float) -> None
@@ -147,22 +150,35 @@ home() -> None
 
 `home()` sends Android's home key event and resets the screenshot cache.
 
+Pass `app` to `device_config()` to configure an Android package by name. `start_app()` and
+`close_app()` then start and force-stop that package.
+
 ### ScreenObject
 
 ```python
 exists() -> bool
 tap() -> bool
+force_tap() -> None
 waitap(timeout: float = 60.0) -> bool
+force_waitap(timeout: float = 60.0) -> None
 swipe(dir: Direction, speed: SwipeSpeed, duration: float) -> bool
+force_swipe(dir: Direction, speed: SwipeSpeed, duration: float) -> None
 tap_nth(n: int) -> bool
+force_tap_nth(n: int) -> None
 count() -> int
 tap_each() -> None
 spam_tap(n: int, interval: float) -> bool
+force_spam_tap(n: int, interval: float) -> None
 wait(timeout: float = 60.0) -> bool
+force_wait(timeout: float = 60.0) -> None
 calibrate(fixed: bool = False, region: str | None = None, n: int | None = None) -> None
+debug(point: Sequence[int]) -> None
 ```
 
 Methods that return `bool` return `False` when the object is not found before acting.
+
+`force_*` variants raise `RuntimeError` instead of returning `False`. They save the current
+screen to `screen.png` to help diagnose a missing object.
 
 ### ScreenRegion
 

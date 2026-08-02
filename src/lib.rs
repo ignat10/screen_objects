@@ -40,8 +40,10 @@ mod screen_objects {
     #[pymodule_export]
     use ScreenRegion;
 
-    #[pymodule_export]
-    use adb::screenshot;
+    #[pyfunction]
+    fn screenshot() -> PyResult<()> {
+        screen::save()
+    }
 
     #[pyfunction]
     fn reset_screen() {
@@ -69,9 +71,8 @@ mod screen_objects {
         let distance = (speed.pixels_per_second() * duration) as u16;
         let end = dir.destination(start, distance);
         let time = (duration * 1000.0) as u16;
-        adb::swipe(start, end, time)?;
         screen::reset();
-        Ok(())
+        adb::swipe(start, end, time)
     }
 
     #[pymodule_export]
@@ -295,6 +296,13 @@ impl ScreenObject {
         }
     }
 
+    fn force_tap(&self) -> PyResult<()> {
+        if !self.tap()? {
+            return Err(force_error(self.name()));
+        }
+        Ok(())
+    }
+
     #[pyo3(signature = (timeout = MINUTE))]
     fn waitap(&self, timeout: f32) -> PyResult<bool> {
         if self.wait(timeout)? {
@@ -304,15 +312,31 @@ impl ScreenObject {
         }
     }
 
+    #[pyo3(signature = (timeout = MINUTE))]
+    fn force_waitap(&self, timeout: f32) -> PyResult<()> {
+        if !self.waitap(timeout)? {
+            return Err(force_error(self.name()));
+        }
+        Ok(())
+    }
+
     fn swipe(&self, dir: Direction, speed: SwipeSpeed, duration: f32) -> PyResult<bool> {
         if let Some(start) = self.find_object()? {
             let distance = (speed.pixels_per_second() * duration) as u16;
             let end = dir.destination(start, distance);
             let time = (duration * 1000.0) as u16;
+            screen::reset();
             adb::swipe(start, end, time).map(|()| true)
         } else {
             Ok(false)
         }
+    }
+
+    fn force_swipe(&self, dir: Direction, speed: SwipeSpeed, duration: f32) -> PyResult<()> {
+        if !self.swipe(dir, speed, duration)? {
+            return Err(force_error(self.name()));
+        }
+        Ok(())
     }
 
     fn tap_nth(&self, n: usize) -> PyResult<bool> {
@@ -325,6 +349,13 @@ impl ScreenObject {
         } else {
             Ok(false)
         }
+    }
+
+    fn force_tap_nth(&self, n: usize) -> PyResult<()> {
+        if !self.tap_nth(n)? {
+            return Err(force_error(self.name()));
+        }
+        Ok(())
     }
 
     fn count(&self) -> PyResult<usize> {
@@ -374,6 +405,13 @@ impl ScreenObject {
         }
     }
 
+    fn force_spam_tap(&self, n: u8, interval: f32) -> PyResult<()> {
+        if !self.spam_tap(n, interval)? {
+            return Err(force_error(self.name()));
+        }
+        Ok(())
+    }
+
     #[pyo3(signature = (timeout = MINUTE))]
     fn wait(&self, timeout: f32) -> PyResult<bool> {
         let timeout = Duration::from_secs_f32(timeout);
@@ -388,9 +426,11 @@ impl ScreenObject {
         Ok(true)
     }
 
-    fn debug(&self, point: Point) -> PyResult<()> {
-        let screenshot = screen::get()?;
-        println!("{:?}", debug_match(&screenshot, self.image()?, point));
+    #[pyo3(signature = (timeout = MINUTE))]
+    fn force_wait(&self, timeout: f32) -> PyResult<()> {
+        if !self.wait(timeout)? {
+            return Err(force_error(self.name()));
+        }
         Ok(())
     }
 }
@@ -534,8 +574,8 @@ impl ScreenObject {
 mod tests {
     use super::*;
 
-    use serde_json::{json, to_string_pretty, Value};
-    use tempfile::{tempdir, TempDir};
+    use serde_json::{Value, json, to_string_pretty};
+    use tempfile::{TempDir, tempdir};
 
     static SAMPLES: LazyLock<TempDir> = LazyLock::new(|| tempdir().unwrap());
     static DATA: LazyLock<Value> = LazyLock::new(|| {
@@ -558,7 +598,7 @@ mod tests {
             fs::File::create(path).unwrap();
         }
         fs::write(
-            SAMPLES.path().parent().unwrap().join("objects_data.json"),
+            SAMPLES.path().parent().unwrap().join("objects.json"),
             to_string_pretty(&*DATA).unwrap(),
         )
         .unwrap();

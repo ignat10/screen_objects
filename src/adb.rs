@@ -1,7 +1,6 @@
 use pyo3::exceptions::{PyBufferError, PyOSError, PyRuntimeError, PyValueError};
-use pyo3::prelude::{pyfunction, PyResult, Python};
-use std::fs::File;
-use std::io::{stdin, Write};
+use pyo3::prelude::{PyResult, Python, pyfunction};
+use std::io::stdin;
 use std::path::PathBuf;
 use std::process::{Command, Output};
 use std::sync::OnceLock;
@@ -44,8 +43,7 @@ pub(super) fn device_config(adb: PathBuf, ip: Option<String>, app: Option<String
     let size = size()?;
     DIMENSIONS
         .set(size)
-        .map_err(|_| PyRuntimeError::new_err("device_config function can only be called once."))
-        ?;
+        .map_err(|_| PyRuntimeError::new_err("device_config function can only be called once."))?;
     if let Some(a) = app {
         let package = find_package(a)?;
         APP.set(package).unwrap();
@@ -71,32 +69,37 @@ fn find_package(name: String) -> PyResult<String> {
     let output = device_action(&["shell", "pm", "list", "packages"])?;
     let packages = String::from_utf8_lossy(&output.stdout);
     for line in packages.lines() {
-        let package = line.strip_prefix("package:")
-            .ok_or_else(|| PyBufferError::new_err("line is not starting with package: "))
-            ?;
+        let package = line
+            .strip_prefix("package:")
+            .ok_or_else(|| PyBufferError::new_err("line is not starting with package: "))?;
         if package.contains(&name) {
             return Ok(package.into());
         }
     }
-    Err(PyValueError::new_err(format!("Package '{}' not found", name)))
+    Err(PyValueError::new_err(format!(
+        "Package '{}' not found",
+        name
+    )))
 }
 
 #[pyfunction]
 pub(super) fn start_app() -> PyResult<()> {
-    let name = APP.get()
-        .ok_or_else(|| PyValueError::new_err("App name not set. Call device_config with app argument before this function."))
-        ?;
-    device_action(&["shell", "monkey", "-p", name, "1"])
-        .map(|_| ())
+    let name = APP.get().ok_or_else(|| {
+        PyValueError::new_err(
+            "App name not set. Call device_config with app argument before this function.",
+        )
+    })?;
+    device_action(&["shell", "monkey", "-p", name, "1"]).map(|_| ())
 }
 
 #[pyfunction]
 pub(super) fn close_app() -> PyResult<()> {
-    let name = APP.get()
-        .ok_or_else(|| PyValueError::new_err("App name not set. Call device_config with app argument before this function."))
-        ?;
-    device_action(&["shell", "am", "force-stop", name])
-        .map(|_| ())
+    let name = APP.get().ok_or_else(|| {
+        PyValueError::new_err(
+            "App name not set. Call device_config with app argument before this function.",
+        )
+    })?;
+    device_action(&["shell", "am", "force-stop", name]).map(|_| ())
 }
 
 pub(super) fn tap(coords: Coords) -> PyResult<()> {
@@ -122,14 +125,6 @@ pub(super) fn swipe(start: Coords, end: Coords, time: u16) -> PyResult<()> {
         &time.to_string(),
     ])
     .map(|_| ())
-}
-
-#[pyfunction]
-pub(super) fn screenshot() -> PyResult<()> {
-    let mut file = File::create("screen.png")?;
-    let out = device_action(&["exec-out", "screencap", "-p"])?.stdout;
-    file.write_all(&out)?;
-    Ok(())
 }
 
 pub(crate) fn screencap() -> PyResult<(u32, u32, Vec<u8>)> {
@@ -214,5 +209,5 @@ fn run(args: &[&str]) -> PyResult<Output> {
     Command::new(ADB.get().unwrap())
         .args(args)
         .output()
-        .map_err(|e| PyOSError::new_err(e.to_string()))
+        .map_err(|e| PyOSError::new_err(format!("ADB Error.\n{e}")))
 }
