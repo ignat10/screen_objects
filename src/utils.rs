@@ -4,11 +4,11 @@ use std::{fs, io};
 use fastrand::u16;
 use pixen::{Image, Point};
 use pyo3::exceptions::{PyBufferError, PyRuntimeError};
-use pyo3::prelude::PyResult;
+use pyo3::prelude::{PyErr, PyResult};
 use stb_image::image;
 
-use crate::screen::{RGBA_CHANNELS, RGB_CHANNELS};
-use crate::{Coords, OBJECTS_DATA, OBJECTS_PATH, REGIONS_DATA, REGIONS_PATH};
+use crate::screen::{RGB_CHANNELS, RGBA_CHANNELS};
+use crate::{Coords, OBJECTS_DATA, OBJECTS_PATH, REGIONS_DATA, REGIONS_PATH, screen};
 
 pub(crate) fn rgba_into_rgb(rgba: Vec<u8>) -> Vec<u8> {
     assert_eq!(rgba.len() % 4, 0);
@@ -74,4 +74,13 @@ pub(super) fn center_coords(top_left: Point, img: &Image) -> Coords {
     let rand_w = u16(w_quarter..w_quarter * 3);
     let rand_h = u16(h_quarter..h_quarter * 3);
     [top_left[0] + rand_w, top_left[1] + rand_h]
+}
+
+pub(super) fn force_error(name: &str) -> PyErr {
+    if let Err(e) = screen::save() {
+        return e;
+    }
+    PyRuntimeError::new_err(format!(
+        "Called force method on {name} object, but it was not found.\nCheck log screen.png"
+    ))
 }

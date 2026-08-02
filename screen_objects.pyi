@@ -1,38 +1,50 @@
 from collections.abc import Sequence
 from pathlib import Path
-from enum import Enum, auto
+from typing import ClassVar
 
-class Direction(Enum):
-    Left = auto()
-    Right = auto()
-    Down = auto()
-    Up = auto()
+class Direction:
+    Left: ClassVar[Direction]
+    Right: ClassVar[Direction]
+    Up: ClassVar[Direction]
+    Down: ClassVar[Direction]
 
-class SwipeSpeed(Enum):
-    Slow = auto()
-    Normal = auto()
-    Fast = auto()
-    Turbo = auto()
+class SwipeSpeed:
+    Slow: ClassVar[SwipeSpeed]
+    Normal: ClassVar[SwipeSpeed]
+    Fast: ClassVar[SwipeSpeed]
+    Turbo: ClassVar[SwipeSpeed]
 
 class ScreenObject:
     def exists(self) -> bool: ...
 
     def tap(self) -> bool: ...
 
+    def force_tap(self) -> None: ...
+
     def waitap(self, timeout: float=60.0) -> bool: ...
 
+    def force_waitap(self, timeout: float=60.0) -> None: ...
+
     def swipe(self, dir: Direction, speed: SwipeSpeed, duration: float) -> bool: ...
-    
+
+    def force_swipe(self, dir: Direction, speed: SwipeSpeed, duration: float) -> None: ...
+
     def tap_nth(self, n: int) -> bool: ...
-    
+
+    def force_tap_nth(self, n: int) -> None: ...
+
     def count(self) -> int: ...
 
     def tap_each(self) -> None: ...
 
     def spam_tap(self, n: int, interval: float) -> bool: ...
 
+    def force_spam_tap(self, n: int, interval: float) -> None: ...
+
     def wait(self, timeout: float=60.0) -> bool: ...
-    
+
+    def force_wait(self, timeout: float=60.0) -> None: ...
+
     def calibrate(self, fixed: bool=False, region: str | None=None, n: int | None=None) -> None: ...
 
     def debug(self, point: Sequence[int]) -> None: ...
