@@ -1,6 +1,6 @@
 [package]
 name = "screen_objects"
-version = "4.16.0"
+version = "5.0.0"
 edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -23,6 +23,3 @@ stb_image = "0.3.0"
 serde = "1.0.229"
 fastrand = "2.5.0"
 png = "0.18.1"
-
-[dev-dependencies]
-tempfile = "3.27.0"

@@ -3,18 +3,21 @@ use std::{fs, io};
 
 use fastrand::u16;
 use pixen::{Image, Point};
+use pyo3::Python;
 use pyo3::exceptions::{PyBufferError, PyRuntimeError};
-use pyo3::prelude::{PyErr, PyResult};
+use pyo3::prelude::PyResult;
 use stb_image::image;
 
-use crate::screen::{RGB_CHANNELS, RGBA_CHANNELS};
-use crate::{Coords, OBJECTS_DATA, OBJECTS_PATH, REGIONS_DATA, REGIONS_PATH, screen};
+use crate::{Coords, OBJECTS_DATA, OBJECTS_PATH, REGIONS_DATA, REGIONS_PATH};
+
+pub(crate) const RGB_CHANNELS: u16 = 3;
+pub(crate) const RGBA_CHANNELS: u16 = 4;
 
 pub(crate) fn rgba_into_rgb(rgba: Vec<u8>) -> Vec<u8> {
     assert_eq!(rgba.len() % 4, 0);
     let mut rgb = Vec::with_capacity(rgba.len() / 4 * 3);
 
-    for [r, g, b, _] in rgba.into_iter().array_chunks::<RGBA_CHANNELS>() {
+    for [r, g, b, _] in rgba.into_iter().array_chunks::<4>() {
         rgb.push(r);
         rgb.push(g);
         rgb.push(b);
@@ -76,11 +79,6 @@ pub(super) fn center_coords(top_left: Point, img: &Image) -> Coords {
     [top_left[0] + rand_w, top_left[1] + rand_h]
 }
 
-pub(super) fn force_error(name: &str) -> PyErr {
-    if let Err(e) = screen::save() {
-        return e;
-    }
-    PyRuntimeError::new_err(format!(
-        "Called force method on {name} object, but it was not found.\nCheck log screen.png"
-    ))
+pub(crate) fn check_python_signals() -> PyResult<()> {
+    Python::attach(|py| py.check_signals())
 }

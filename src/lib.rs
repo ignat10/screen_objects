@@ -1,21 +1,18 @@
-#![feature(mapped_lock_guards)]
 #![feature(iter_array_chunks)]
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{LazyLock, OnceLock, RwLock};
-use std::time::{Duration, Instant};
 
 use pixen::*;
-use pyo3::exceptions::{PyRuntimeError, PyValueError};
+use pyo3::exceptions::{PyException, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use serde::de::DeserializeOwned;
 use serde_json::from_reader;
 use walkdir::WalkDir;
 
-pub mod adb;
-pub mod screen;
+mod adb;
 pub mod utils;
 
 use utils::*;
@@ -29,74 +26,19 @@ mod screen_objects {
     use super::*;
 
     #[pymodule_export]
-    use get_objects;
+    use adb::Device;
 
     #[pymodule_export]
-    use ScreenObject;
+    use adb::DeviceObject;
 
     #[pymodule_export]
-    use get_regions;
+    use adb::get_devices;
 
     #[pymodule_export]
-    use ScreenRegion;
-
-    #[pyfunction]
-    fn screenshot() -> PyResult<()> {
-        screen::save()
-    }
-
-    #[pyfunction]
-    fn reset_screen() {
-        screen::reset();
-    }
-
-    #[pyfunction]
-    fn tap_center() -> PyResult<()> {
-        let [w, h] = adb::DIMENSIONS.get().copied().ok_or_else(|| {
-            PyRuntimeError::new_err("device_config must be called before tap_center")
-        })?;
-
-        adb::tap([w / 2, h / 2])?;
-        screen::reset();
-        Ok(())
-    }
-
-    #[pyfunction]
-    fn swipe_center(dir: Direction, speed: SwipeSpeed, duration: f32) -> PyResult<()> {
-        let [w, h] = adb::DIMENSIONS.get().copied().ok_or_else(|| {
-            PyRuntimeError::new_err("device_config must be called before swipe_center")
-        })?;
-
-        let start = [w / 2, h / 2];
-        let distance = (speed.pixels_per_second() * duration) as u16;
-        let end = dir.destination(start, distance);
-        let time = (duration * 1000.0) as u16;
-        screen::reset();
-        adb::swipe(start, end, time)
-    }
+    use config_objects;
 
     #[pymodule_export]
-    use adb::device_config;
-
-    #[pymodule_export]
-    use adb::start_app;
-
-    #[pymodule_export]
-    use adb::close_app;
-
-    #[pyfunction]
-    fn back() -> PyResult<()> {
-        adb::back()?;
-        screen::reset();
-        Ok(())
-    }
-
-    #[pyfunction]
-    fn home() -> PyResult<()> {
-        adb::home()?;
-        screen::reset();
-        Ok(())
-    }
+    use config_regions;
 
     #[pymodule_export]
     use Direction;
@@ -105,29 +47,30 @@ mod screen_objects {
     use SwipeSpeed;
 }
 
+type ObjectData = HashMap<String, (Option<Point>, Option<String>, u8)>;
 static OBJECTS_PATH: OnceLock<PathBuf> = OnceLock::new();
-static OBJECTS_DATA: LazyLock<RwLock<HashMap<String, (Option<Point>, Option<String>, u8)>>> =
-    LazyLock::new(|| {
-        let path = OBJECTS_PATH
-            .get()
-            .expect("OBJECTS_PATH must be initialized");
-        load_data(path)
-    });
+static OBJECTS_DATA: LazyLock<RwLock<ObjectData>> = LazyLock::new(|| {
+    let path = OBJECTS_PATH
+        .get()
+        .expect("OBJECTS_PATH must be initialized");
+    load_json(path)
+});
 
+type RegionData = HashMap<String, Region>;
 static REGIONS_PATH: OnceLock<PathBuf> = OnceLock::new();
-static REGIONS_DATA: LazyLock<RwLock<HashMap<String, Region>>> = LazyLock::new(|| {
+static REGIONS_DATA: LazyLock<RwLock<RegionData>> = LazyLock::new(|| {
     let path = REGIONS_PATH
         .get()
         .expect("REGIONS_PATH must be initialized");
-    load_data(path)
+    load_json(path)
 });
 
-fn load_data<T>(path: &PathBuf) -> RwLock<T>
+fn load_json<T>(path: &PathBuf) -> T
 where
     T: DeserializeOwned + Default,
 {
     if !path.exists() {
-        return RwLock::new(T::default());
+        return T::default();
     }
     let file =
         fs::File::open(&path).expect(format!("Failed to open file {}", path.display()).as_str());
@@ -136,32 +79,53 @@ where
             .expect(format!("failed to delete data-file {}.", path.display()).as_str());
         T::default()
     });
-    RwLock::new(map)
+    map
 }
 
 #[pyfunction]
-fn get_regions(regions_dir: PathBuf) -> PyResult<HashMap<String, ScreenRegion>> {
+fn config_regions(regions_dir: PathBuf) -> PyResult<()> {
     let parent = regions_dir.parent().unwrap();
     REGIONS_PATH
         .set(parent.join("regions.json"))
-        .map_err(|_| PyRuntimeError::new_err("get_regions can be called after get_objects!"))?;
+        .map_err(|_| PyRuntimeError::new_err("config_regions can only be called once"))?;
 
-    Ok(walk_dir(&regions_dir)?
+    let regions: HashMap<String, ScreenRegion> = sample_paths(&regions_dir)?
         .into_iter()
         .map(|path| {
             let name = path.file_stem().unwrap().to_str().unwrap().to_string();
             (name, ScreenRegion { path })
         })
-        .collect())
+        .collect();
+
+    REGION_SAMPLES
+        .set(regions)
+        .map_err(|_| PyRuntimeError::new_err("config_regions can only be called once"))
+}
+
+static REGION_SAMPLES: OnceLock<HashMap<String, ScreenRegion>> = OnceLock::new();
+
+pub(crate) fn screen_region(key: &str) -> PyResult<&ScreenRegion> {
+    REGION_SAMPLES
+        .get()
+        .ok_or_else(|| PyException::new_err("call config_regions before calibrating regions"))?
+        .get(key)
+        .ok_or_else(|| PyValueError::new_err(format!("No region found with key: {key}")))
+}
+
+static SCREEN_OBJECTS: OnceLock<HashMap<String, ScreenObject>> = OnceLock::new();
+
+pub(crate) fn screen_object(key: &str) -> PyResult<&ScreenObject> {
+    SCREEN_OBJECTS
+        .get()
+        .ok_or_else(|| PyException::new_err("call config_objects before object actions"))?
+        .get(key)
+        .ok_or_else(|| PyValueError::new_err(format!("No object found with key: {key}")))
 }
 
 #[pyfunction]
 #[pyo3(signature = (objects_dir, regions_dir = None))]
-fn get_objects(
-    objects_dir: PathBuf,
-    regions_dir: Option<PathBuf>,
-) -> PyResult<HashMap<String, ScreenObject>> {
-    let files: Vec<PathBuf> = walk_dir(&objects_dir)?.collect();
+fn config_objects(objects_dir: PathBuf, regions_dir: Option<PathBuf>) -> PyResult<()> {
+    let files: Vec<PathBuf> = sample_paths(&objects_dir)?.collect();
     let mut seen_files = HashSet::new();
     for file in files.iter().map(|p| p.file_stem().unwrap().to_owned()) {
         if !seen_files.insert(file.clone()) {
@@ -175,18 +139,11 @@ fn get_objects(
     let parent = objects_dir.parent().unwrap();
     OBJECTS_PATH
         .set(parent.join("objects.json"))
-        .map_err(|_| PyValueError::new_err("get_objects can be called only once."))?;
+        .map_err(|_| PyValueError::new_err("config_objects can only be called once"))?;
     let mut objects_data = OBJECTS_DATA.write().unwrap();
 
-    let regions = if let Some(dir) = regions_dir {
-        let parent = dir.parent().unwrap();
-        if REGIONS_PATH.get().is_none() {
-            REGIONS_PATH.set(parent.join("regions.json")).unwrap();
-        }
-        Some(REGIONS_DATA.read().unwrap())
-    } else {
-        None
-    };
+    let regions_path = regions_dir.map(|dir| dir.parent().unwrap().join("regions.json"));
+    let regions: Option<RegionData> = regions_path.map(|path| load_json(&path));
 
     let mut objects = HashMap::new();
     for file in files {
@@ -202,7 +159,7 @@ fn get_objects(
                     Some(reg)
                 } else {
                     return Err(PyValueError::new_err(format!(
-                        "There is not region called '{}'. existing regions: {:?}",
+                        "Region '{}' was not found. Available regions: {:?}",
                         k,
                         regs.keys().collect::<Vec<_>>()
                     )));
@@ -211,18 +168,19 @@ fn get_objects(
             (_, None) => None,
             (None, Some(k)) => {
                 return Err(PyValueError::new_err(format!(
-                    "called region {}, but there is no regions loaded",
-                    k
+                    "Object references region '{k}', but no regions directory was provided",
                 )));
             }
         };
 
         objects.insert(name, ScreenObject::new(file, coords, region, tolerance));
     }
-    Ok(objects)
+    SCREEN_OBJECTS
+        .set(objects)
+        .map_err(|_| PyValueError::new_err("config_objects can only be called once"))
 }
 
-fn walk_dir(root: &PathBuf) -> PyResult<impl Iterator<Item = PathBuf>> {
+fn sample_paths(root: &PathBuf) -> PyResult<impl Iterator<Item = PathBuf>> {
     Ok(WalkDir::new(root)
         .into_iter()
         .collect::<Result<Vec<_>, _>>()
@@ -231,45 +189,44 @@ fn walk_dir(root: &PathBuf) -> PyResult<impl Iterator<Item = PathBuf>> {
         .filter(|entry| entry.file_type().is_file())
         .map(|entry| entry.into_path()))
 }
-#[pyclass]
+
 struct ScreenRegion {
     path: PathBuf,
 }
 
-#[pymethods]
 impl ScreenRegion {
-    fn calibrate(&self) -> PyResult<()> {
-        let screenshot = screen::get()?;
+    fn calibrate(&self, screen: &Image) -> PyResult<()> {
         let image = load_image(&self.path)?;
         let name = self.path.file_stem().unwrap().to_str().unwrap().to_string();
-        let region = get_region(&screenshot, &image);
+        let region = get_region(screen, &image);
 
         REGIONS_DATA.write().unwrap().insert(name, region);
         save_regions()
     }
 }
 
-#[pyclass]
 struct ScreenObject {
     path: PathBuf,
     image: OnceLock<PyResult<Image>>,
-    coords: Option<[u16; 2]>,
+    coords: Option<Coords>,
     region: Option<Region>,
     tolerance: u8,
 }
 
-#[pymethods]
 impl ScreenObject {
-    #[pyo3(signature = (fixed = false, region = None, n = None))]
-    fn calibrate(&self, fixed: bool, region: Option<String>, n: Option<usize>) -> PyResult<()> {
-        let screenshot = screen::get()?;
+    fn calibrate(
+        &self,
+        screen: &Image,
+        fixed: bool,
+        region: Option<String>,
+        n: Option<usize>,
+    ) -> PyResult<()> {
         let image = self.image()?;
-
         let (tolerance, coords) = match (self.region, n) {
-            (Some(region), Some(n)) => get_nth_tolerance_in_region(&screenshot, image, region, n),
-            (Some(region), None) => get_tolerance_in_region(&screenshot, image, region),
-            (None, Some(n)) => get_nth_tolerance(&screenshot, image, n),
-            (None, None) => get_tolerance(&screenshot, image),
+            (Some(region), Some(n)) => get_nth_tolerance_in_region(screen, image, region, n),
+            (Some(region), None) => get_tolerance_in_region(screen, image, region),
+            (None, Some(n)) => get_nth_tolerance(screen, image, n),
+            (None, None) => get_tolerance(screen, image),
         };
 
         *OBJECTS_DATA.write().unwrap().get_mut(self.name()).unwrap() = (
@@ -279,164 +236,6 @@ impl ScreenObject {
         );
         save_objects()
     }
-
-    fn exists(&self) -> PyResult<bool> {
-        self.is_on_screen()
-    }
-
-    fn tap(&self) -> PyResult<bool> {
-        if let Some(coords) = self.find_object()? {
-            let center = center_coords(coords, self.image()?);
-            check_python_signals()?;
-            adb::tap(center)?;
-            screen::reset();
-            Ok(true)
-        } else {
-            Ok(false)
-        }
-    }
-
-    fn force_tap(&self) -> PyResult<()> {
-        if !self.tap()? {
-            return Err(force_error(self.name()));
-        }
-        Ok(())
-    }
-
-    #[pyo3(signature = (timeout = MINUTE))]
-    fn waitap(&self, timeout: f32) -> PyResult<bool> {
-        if self.wait(timeout)? {
-            self.tap()
-        } else {
-            Ok(false)
-        }
-    }
-
-    #[pyo3(signature = (timeout = MINUTE))]
-    fn force_waitap(&self, timeout: f32) -> PyResult<()> {
-        if !self.waitap(timeout)? {
-            return Err(force_error(self.name()));
-        }
-        Ok(())
-    }
-
-    fn swipe(&self, dir: Direction, speed: SwipeSpeed, duration: f32) -> PyResult<bool> {
-        if let Some(start) = self.find_object()? {
-            let distance = (speed.pixels_per_second() * duration) as u16;
-            let end = dir.destination(start, distance);
-            let time = (duration * 1000.0) as u16;
-            screen::reset();
-            adb::swipe(start, end, time).map(|()| true)
-        } else {
-            Ok(false)
-        }
-    }
-
-    fn force_swipe(&self, dir: Direction, speed: SwipeSpeed, duration: f32) -> PyResult<()> {
-        if !self.swipe(dir, speed, duration)? {
-            return Err(force_error(self.name()));
-        }
-        Ok(())
-    }
-
-    fn tap_nth(&self, n: usize) -> PyResult<bool> {
-        if let Some(coords) = self.find_nth(n)? {
-            let center = center_coords(coords, self.image()?);
-            check_python_signals()?;
-            adb::tap(center)?;
-            screen::reset();
-            Ok(true)
-        } else {
-            Ok(false)
-        }
-    }
-
-    fn force_tap_nth(&self, n: usize) -> PyResult<()> {
-        if !self.tap_nth(n)? {
-            return Err(force_error(self.name()));
-        }
-        Ok(())
-    }
-
-    fn count(&self) -> PyResult<usize> {
-        let screenshot = screen::get()?;
-        let image = self.image()?;
-        let tolerance = self.tolerance;
-
-        Ok(if let Some(region) = self.region {
-            count_in_region(&*screenshot, image, region, tolerance)
-        } else {
-            count(&*screenshot, image, tolerance)
-        })
-    }
-
-    fn tap_each(&self) -> PyResult<()> {
-        let screenshot = screen::get()?;
-        let image = self.image()?;
-        let tolerance = self.tolerance;
-        let coords = if let Some(region) = self.region {
-            find_all_in_region(&screenshot, image, region, tolerance)
-        } else {
-            find_all(&screenshot, image, tolerance)
-        };
-        for coord in coords {
-            let center = center_coords(coord, image);
-            check_python_signals()?;
-            adb::tap(center)?;
-        }
-        drop(screenshot);
-        screen::reset();
-        Ok(())
-    }
-
-    fn spam_tap(&self, n: u8, interval: f32) -> PyResult<bool> {
-        if let Some(coords) = self.find_object()? {
-            let image = self.image()?;
-            let center = center_coords(coords, image);
-            for _ in 0..n {
-                adb::tap(center)?;
-                std::thread::sleep(Duration::from_secs_f32(interval));
-                check_python_signals()?;
-            }
-            screen::reset();
-            Ok(true)
-        } else {
-            Ok(false)
-        }
-    }
-
-    fn force_spam_tap(&self, n: u8, interval: f32) -> PyResult<()> {
-        if !self.spam_tap(n, interval)? {
-            return Err(force_error(self.name()));
-        }
-        Ok(())
-    }
-
-    #[pyo3(signature = (timeout = MINUTE))]
-    fn wait(&self, timeout: f32) -> PyResult<bool> {
-        let timeout = Duration::from_secs_f32(timeout);
-        let start = Instant::now();
-        while !self.exists()? {
-            if start.elapsed() > timeout {
-                return Ok(false);
-            }
-            check_python_signals()?;
-            screen::reset();
-        }
-        Ok(true)
-    }
-
-    #[pyo3(signature = (timeout = MINUTE))]
-    fn force_wait(&self, timeout: f32) -> PyResult<()> {
-        if !self.wait(timeout)? {
-            return Err(force_error(self.name()));
-        }
-        Ok(())
-    }
-}
-
-fn check_python_signals() -> PyResult<()> {
-    Python::attach(|py| py.check_signals())
 }
 
 #[pyclass(from_py_object)]
@@ -450,12 +249,11 @@ enum Direction {
 
 impl Direction {
     fn destination(&self, mut coords: Coords, distance: u16) -> Coords {
-        let [w, h] = adb::DIMENSIONS.get().unwrap().clone();
         match self {
             Direction::Left => coords[0] = coords[0].saturating_sub(distance),
-            Direction::Right => coords[0] = coords[0].saturating_add(distance).min(w),
+            Direction::Right => coords[0] = coords[0].saturating_add(distance),
             Direction::Up => coords[1] = coords[1].saturating_sub(distance),
-            Direction::Down => coords[1] = coords[1].saturating_add(distance).min(h),
+            Direction::Down => coords[1] = coords[1].saturating_add(distance),
         }
         coords
     }
@@ -492,70 +290,88 @@ impl ScreenObject {
         }
     }
 
-    fn find_object(&self) -> PyResult<Option<Coords>> {
-        if self.coords.is_some() {
-            if self.matches_at_coords()? {
-                Ok(self.coords)
+    fn find_object(&self, screen: &Image) -> PyResult<Option<Coords>> {
+        let image = self.image()?;
+        let coords = if self.coords.is_some() {
+            if self.matches_at_coords(screen)? {
+                self.coords
             } else {
-                Ok(None)
+                None
             }
         } else {
-            let screenshot = screen::get()?;
-            let image = self.image()?;
+            let image = image;
             let tolerance = self.tolerance;
-            Ok(if let Some(region) = self.region {
-                find_in_region(&screenshot, image, region, tolerance)
+            if let Some(region) = self.region {
+                find_in_region(screen, image, region, tolerance)
             } else {
-                find_best(&screenshot, image, tolerance)
-            })
-        }
+                find_best(screen, image, tolerance)
+            }
+        };
+        Ok(coords.map(|coords| center_coords(coords, image)))
     }
 
-    fn is_on_screen(&self) -> PyResult<bool> {
+    fn is_on_screen(&self, screen: &Image) -> PyResult<bool> {
         if self.coords.is_some() {
-            Ok(self.matches_at_coords()?)
+            Ok(self.matches_at_coords(screen)?)
         } else {
-            let screenshot = screen::get()?;
             let image = self.image()?;
             let tolerance = self.tolerance;
 
             Ok(if let Some(region) = self.region {
-                matches_in_region(&*screenshot, image, region, tolerance)
+                matches_in_region(screen, image, region, tolerance)
             } else {
-                matches(&screenshot, image, tolerance)
+                matches(screen, image, tolerance)
             })
         }
     }
 
-    fn find_nth(&self, n: usize) -> PyResult<Option<[u16; 2]>> {
+    fn count_on_screen(&self, screen: &Image) -> PyResult<usize> {
+        let image = self.image()?;
+        let tolerance = self.tolerance;
+        Ok(if let Some(region) = self.region {
+            count_in_region(screen, image, region, tolerance)
+        } else {
+            count(screen, image, tolerance)
+        })
+    }
+
+    fn find_each(&self, screen: &Image) -> PyResult<Vec<Coords>> {
+        let image = self.image()?;
+        let tolerance = self.tolerance;
+        Ok(if let Some(region) = self.region {
+            find_all_in_region(screen, image, region, tolerance)
+        } else {
+            find_all(screen, image, tolerance)
+        })
+    }
+
+    fn find_nth(&self, screen: &Image, n: usize) -> PyResult<Option<Coords>> {
         if self.coords.is_some() {
             Err(PyValueError::new_err(format!(
                 "Tried to find nth {}, but it has fixed coords.",
                 self.name()
             )))
         } else {
-            let screenshot = screen::get()?;
             let image = self.image()?;
             let tolerance = self.tolerance;
 
             Ok(if let Some(region) = self.region {
-                find_nth_in_region(&screenshot, image, region, tolerance, n)
+                find_nth_in_region(screen, image, region, tolerance, n)
             } else {
-                find_nth(&screenshot, image, tolerance, n)
+                find_nth(screen, image, tolerance, n)
             })
         }
     }
 
-    fn matches_at_coords(&self) -> PyResult<bool> {
+    fn matches_at_coords(&self, screen: &Image) -> PyResult<bool> {
         let coords = self.coords.ok_or(PyValueError::new_err(format!(
             "Not found coords for {}.",
             self.name()
         )))?;
-        let screenshot = screen::get()?;
         let image = self.image()?;
         let tolerance = self.tolerance;
 
-        Ok(matches_at(&*screenshot, image, coords, tolerance))
+        Ok(matches_at(screen, image, coords, tolerance))
     }
 
     fn image(&self) -> PyResult<&Image> {
@@ -567,55 +383,5 @@ impl ScreenObject {
 
     fn name(&self) -> &str {
         self.path.file_stem().unwrap().to_str().unwrap()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    use serde_json::{Value, json, to_string_pretty};
-    use tempfile::{TempDir, tempdir};
-
-    static SAMPLES: LazyLock<TempDir> = LazyLock::new(|| tempdir().unwrap());
-    static DATA: LazyLock<Value> = LazyLock::new(|| {
-        json!({
-            "alpha": (
-                [100, 200],
-                Value::Null,
-                5
-            ),
-            "delta": (
-                [1, 1],
-                Value::Null,
-                6
-            )
-        })
-    });
-    static OBJECTS: LazyLock<HashMap<String, ScreenObject>> = LazyLock::new(|| {
-        for obj in DATA.as_object().unwrap().keys() {
-            let path = SAMPLES.path().join(format!("{}.png", obj));
-            fs::File::create(path).unwrap();
-        }
-        fs::write(
-            SAMPLES.path().parent().unwrap().join("objects.json"),
-            to_string_pretty(&*DATA).unwrap(),
-        )
-        .unwrap();
-        get_objects(SAMPLES.path().to_path_buf(), None).unwrap()
-    });
-
-    #[test]
-    fn get_objects_with_data() {
-        let obj = OBJECTS.get("alpha").unwrap();
-        let coords = obj.coords.clone();
-
-        assert_eq!(coords, Some([100, 200]));
-    }
-
-    #[test]
-    fn get_objects_without_data() {
-        let obj = OBJECTS.get("delta").unwrap();
-        assert_eq!(obj.coords, Some([1, 1]));
     }
 }
