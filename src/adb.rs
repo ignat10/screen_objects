@@ -33,6 +33,8 @@ pub(super) struct Device {
     dimensions: Coords,
     screen: Option<Image>,
     app: Option<String>,
+    #[pyo3(get, set)]
+    is_available: bool,
 }
 
 #[pymethods]
@@ -419,6 +421,7 @@ impl Device {
             screen: None,
             dimensions,
             app,
+            is_available: true,
         })
     }
 
