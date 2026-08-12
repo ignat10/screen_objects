@@ -40,6 +40,7 @@ class DeviceObject:
     def count(self) -> int: ...
 
 class Device:
+    is_available: bool
     def __getitem__(self, name: str) -> DeviceObject: ...
     def calibrate(
         self,
