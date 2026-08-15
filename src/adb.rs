@@ -155,21 +155,13 @@ pub(crate) fn home() -> PyResult<()> {
 
 fn scan() -> PyResult<Vec<String>> {
     let raw_output = run(&["devices"])?.stdout;
-    let text_output = String::from_utf8_lossy(&raw_output).into_owned();
+    let text_output = String::from_utf8_lossy(&raw_output);
 
     let devices = text_output.lines().skip(1);
     Ok(devices
         .filter_map(|line| {
-            let [serial, status]: [&str; 2] = line
-                .split_whitespace()
-                .collect::<Vec<&str>>()
-                .try_into()
-                .unwrap();
-            if status == "device" {
-                Some(serial.to_string())
-            } else {
-                None
-            }
+            let (serial, status) = line.split_once('\t')?;
+            (status == "device").then(|| serial.to_owned())
         })
         .collect())
 }
