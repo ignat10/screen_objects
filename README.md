@@ -139,7 +139,8 @@ back() -> None
 home() -> None
 ```
 
-`screenshot()` writes the current device screenshot to `screen.png`.
+`screenshot()` writes the current device screenshot to `screen-<device-serial>.png`. Characters
+that are not portable in filenames are replaced with underscores.
 
 `reset_screen()` clears the cached screenshot so the next lookup captures a fresh screen.
 
@@ -181,7 +182,7 @@ debug(point: Sequence[int]) -> None
 Methods that return `bool` return `False` when the object is not found before acting.
 
 `force_*` variants raise `RuntimeError` instead of returning `False`. They save the current
-screen to `screen.png` to help diagnose a missing object.
+screen to `screen-<device-serial>.png` to help diagnose a missing object.
 
 ### ScreenRegion
 

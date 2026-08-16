@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 use crate::Coords;
 
 static ADB: OnceLock<PathBuf> = OnceLock::new();
-static DEVICE_SERIAL: OnceLock<String> = OnceLock::new();
+pub(crate) static DEVICE_SERIAL: OnceLock<String> = OnceLock::new();
 static APP: OnceLock<String> = OnceLock::new();
 pub(crate) static DIMENSIONS: OnceLock<Coords> = OnceLock::new();
 
@@ -23,31 +23,32 @@ pub(super) fn device_config(
         .map_err(|_| PyRuntimeError::new_err("device_config function can only be called once."))?;
 
     let device;
-    loop {
-        Python::attach(|py| py.check_signals())?;
-        if let Some(serial) = serial.as_ref() {
-            let devices = scan()?;
-            if devices.contains(serial) {
+    if let Some(serial) = serial {
+        loop {
+            Python::attach(|py| py.check_signals())?;
+            if scan()?.contains(&serial) {
+                device = serial;
+                break;
+            }
+        }
+    } else {
+        loop {
+            if let Some(serial) = scan()?.first() {
                 device = serial.to_string();
                 break;
-            } else {
-                if let Some(_device) = devices.first() {
-                    device = _device.to_string();
-                    break;
-                }
             }
         }
     }
 
     DEVICE_SERIAL
         .set(device)
-        .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+        .map_err(|_| PyRuntimeError::new_err("device_config function can only be called once."))?;
     println!("device connected");
 
     let size = size()?;
     DIMENSIONS
         .set(size)
-        .map_err(|_| PyRuntimeError::new_err("device_config function can only be called once."))?;
+        .unwrap(); // if DEVICE_SERIAL.set() is Ok, then this also
     if let Some(a) = app {
         let package = find_package(a)?;
         APP.set(package).unwrap();

@@ -7,6 +7,7 @@ use pyo3::exceptions::{PyOSError, PyRuntimeError};
 use pyo3::prelude::PyResult;
 
 use crate::adb;
+use crate::adb::DEVICE_SERIAL;
 use crate::utils::rgba_into_rgb;
 
 pub(crate) const RGB_CHANNELS: usize = 3;
@@ -49,7 +50,7 @@ pub(crate) fn save() -> PyResult<()> {
     let buffer = guard.as_raw();
     let [width, height] = guard.dimensions();
 
-    let file = File::create("screen.png")?;
+    let file = File::create(filename()?)?;
     let mut encoder = Encoder::new(file, width.into(), height.into());
     encoder.set_color(ColorType::Rgb);
     encoder.set_depth(BitDepth::Eight);
@@ -61,4 +62,13 @@ pub(crate) fn save() -> PyResult<()> {
     writer
         .write_image_data(buffer)
         .map_err(|e| PyOSError::new_err(e.to_string()))
+}
+
+pub(crate) fn filename() -> PyResult<String> {
+    let device = DEVICE_SERIAL.get().ok_or_else(|| {
+        PyRuntimeError::new_err("device_config should be called before taking a screenshot.")
+    })?;
+    let safe_device = device.replace(':', "_");
+
+    Ok(format!("screen-{safe_device}.png"))
 }

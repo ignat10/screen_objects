@@ -80,7 +80,8 @@ pub(super) fn force_error(name: &str) -> PyErr {
     if let Err(e) = screen::save() {
         return e;
     }
+    let filename = screen::filename().unwrap_or_else(|_| "screen.png".to_string());
     PyRuntimeError::new_err(format!(
-        "Called force method on {name} object, but it was not found.\nCheck log screen.png"
+        "Called force method on {name} object, but it was not found.\nCheck log {filename}"
     ))
 }
