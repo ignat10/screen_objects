@@ -137,6 +137,7 @@ swipe_center(dir: Direction, speed: SwipeSpeed, duration: float) -> None
 screenshot() -> None
 back() -> None
 home() -> None
+write(text: str) -> None
 ```
 
 `screenshot()` writes the current device screenshot to `screen-<device-serial>.png`. Characters
@@ -151,6 +152,8 @@ that are not portable in filenames are replaced with underscores.
 `back()` sends Android's back key event and resets the screenshot cache.
 
 `home()` sends Android's home key event and resets the screenshot cache.
+
+`write()` enters text into the focused field using Android's `input text` command and resets the screenshot cache.
 
 Pass `app` to `device_config()` to configure an Android package by name. `start_app()` and
 `close_app()` then start and force-stop that package.

@@ -154,6 +154,11 @@ pub(crate) fn home() -> PyResult<()> {
     device_action(&["shell", "input", "keyevent", "3"]).map(|_| ())
 }
 
+pub(crate) fn write(text: &str) -> PyResult<()> {
+    let text = text.replace(' ', "%s");
+    device_action(&["shell", "input", "text", &text]).map(|_| ())
+}
+
 fn scan() -> PyResult<Vec<String>> {
     let raw_output = run(&["devices"])?.stdout;
     let text_output = String::from_utf8_lossy(&raw_output);

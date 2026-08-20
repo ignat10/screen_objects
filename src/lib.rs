@@ -98,6 +98,11 @@ mod screen_objects {
         Ok(())
     }
 
+    #[pyfunction]
+    fn write(text: &str) -> PyResult<()> {
+        adb::write(text)
+    }
+
     #[pymodule_export]
     use Direction;
 
