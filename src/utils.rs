@@ -38,9 +38,9 @@ fn save(path: &PathBuf, data: impl serde::Serialize) -> PyResult<()> {
 }
 
 pub(super) fn load_image(path: &PathBuf) -> PyResult<Image> {
-    match image::load(&path) {
+    match image::load(path) {
         image::LoadResult::ImageU8(img) => Ok(Image::new(
-            match img.depth.try_into().unwrap() {
+            match img.depth {
                 RGB_CHANNELS => img.data,
                 RGBA_CHANNELS => rgba_into_rgb(img.data),
                 c => {

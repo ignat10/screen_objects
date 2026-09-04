@@ -46,9 +46,7 @@ pub(super) fn device_config(
     println!("device connected");
 
     let size = size()?;
-    DIMENSIONS
-        .set(size)
-        .unwrap(); // if DEVICE_SERIAL.set() is Ok, then this also
+    DIMENSIONS.set(size).unwrap(); // if DEVICE_SERIAL.set() is Ok, then this also
     if let Some(a) = app {
         let package = find_package(a)?;
         APP.set(package).unwrap();
@@ -137,7 +135,7 @@ pub(crate) fn screencap() -> PyResult<(u32, u32, Vec<u8>)> {
     let [width, height]: [u32; 2] = output
         .drain(..16)
         .array_chunks::<4>()
-        .map(|chunk| u32::from_le_bytes(chunk))
+        .map(u32::from_le_bytes)
         .take(2)
         .collect::<Vec<u32>>()
         .try_into()

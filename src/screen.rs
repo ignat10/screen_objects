@@ -31,7 +31,7 @@ pub(super) fn get() -> PyResult<MappedRwLockReadGuard<'static, Image>> {
             h.try_into().unwrap(),
             RGB_CHANNELS.try_into().unwrap(),
         )
-        .map_err(|e| PyRuntimeError::new_err(e))?;
+        .map_err(PyRuntimeError::new_err)?;
 
         *guard = Some(image);
     }
