@@ -72,7 +72,7 @@ pub(super) fn center_coords(top_left: Point, img: &Image) -> Coords {
     let w_quarter = w / 4;
     let h_quarter = h / 4;
     let rand_w = u16(w_quarter..w_quarter * 3);
-    let rand_h = u16(h_quarter..h_quarter * 3);
+    let rand_h = u16(h_quarter..(h_quarter * 3).max(1));
     [top_left[0] + rand_w, top_left[1] + rand_h]
 }
 
