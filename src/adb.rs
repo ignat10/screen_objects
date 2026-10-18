@@ -151,6 +151,10 @@ pub(crate) fn screencap() -> PyResult<(u32, u32, Vec<u8>)> {
         .try_into()
         .map_err(|v| PyBufferError::new_err(format!("Expected: width, height, found {:?}", v)))?;
 
+    if output.len() % 4 != 0 {
+        return screencap();
+    }
+
     Ok((width, height, output))
 }
 
