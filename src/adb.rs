@@ -6,13 +6,12 @@ use pyo3::prelude::{PyResult, Python, pyfunction};
 use std::path::PathBuf;
 use std::process::{Command, Output};
 use std::sync::OnceLock;
-
-use crate::Coords;
+use pixen::Point;
 
 static ADB: OnceLock<PathBuf> = OnceLock::new();
 pub(crate) static DEVICE_SERIAL: OnceLock<String> = OnceLock::new();
 static APP: OnceLock<String> = OnceLock::new();
-pub(crate) static DIMENSIONS: OnceLock<Coords> = OnceLock::new();
+pub(crate) static DIMENSIONS: OnceLock<Point> = OnceLock::new();
 
 #[pyfunction]
 #[pyo3(signature = (adb = PathBuf::from("adb"), serial = None, app = None))]
@@ -57,13 +56,13 @@ pub(super) fn device_config(
     Ok(())
 }
 
-fn size() -> PyResult<Coords> {
+fn size() -> PyResult<Point> {
     let output = device_action(&["shell", "wm", "size"])?.stdout;
     let size_str = String::from_utf8_lossy(&output);
     parse_size(&size_str)
 }
 
-fn parse_size(size_output: &str) -> PyResult<Coords> {
+fn parse_size(size_output: &str) -> PyResult<Point> {
     let size_part = size_output
         .split_whitespace()
         .last()
@@ -111,18 +110,18 @@ pub(super) fn close_app() -> PyResult<()> {
     device_action(&["shell", "am", "force-stop", name]).map(|_| ())
 }
 
-pub(super) fn tap(coords: Coords) -> PyResult<()> {
+pub(super) fn tap(point: Point) -> PyResult<()> {
     device_action(&[
         "shell",
         "input",
         "tap",
-        &coords[0].to_string(),
-        &coords[1].to_string(),
+        &point[0].to_string(),
+        &point[1].to_string(),
     ])
     .map(|_| ())
 }
 
-pub(super) fn swipe(start: Coords, end: Coords, time: u16) -> PyResult<()> {
+pub(super) fn swipe(start: Point, end: Point, time: u16) -> PyResult<()> {
     device_action(&[
         "shell",
         "input",

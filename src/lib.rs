@@ -21,7 +21,6 @@ pub mod utils;
 
 use utils::*;
 
-pub(crate) type Coords = Point;
 const BASE_TOLERANCE: u8 = 5;
 const MINUTE: f32 = 60.0;
 
@@ -333,7 +332,7 @@ impl ScreenObject {
 
     fn tap(&self) -> PyResult<bool> {
         if let Some(coords) = self.find_on_screen()? {
-            let center = center_coords(coords, self.image()?);
+            let center = center_point(coords, self.image()?);
             check_python_signals()?;
             adb::tap(center)?;
             screen::reset();
@@ -388,7 +387,7 @@ impl ScreenObject {
 
     fn tap_nth(&self, n: usize) -> PyResult<bool> {
         if let Some(coords) = self.find_nth(n)? {
-            let center = center_coords(coords, self.image()?);
+            let center = center_point(coords, self.image()?);
             check_python_signals()?;
             adb::tap(center)?;
             screen::reset();
@@ -422,7 +421,7 @@ impl ScreenObject {
     fn tap_each(&self) -> PyResult<()> {
         let image = self.image()?;
         for point in self.find_all()? {
-            let center = center_coords(point, image);
+            let center = center_point(point, image);
             check_python_signals()?;
             adb::tap(center)?;
             screen::reset();
@@ -433,7 +432,7 @@ impl ScreenObject {
     fn spam_tap(&self, n: u8, interval: f32) -> PyResult<bool> {
         if let Some(coords) = self.find_on_screen()? {
             let image = self.image()?;
-            let center = center_coords(coords, image);
+            let center = center_point(coords, image);
             for _ in 0..n {
                 adb::tap(center)?;
                 std::thread::sleep(Duration::from_secs_f32(interval));
@@ -490,15 +489,15 @@ enum Direction {
 }
 
 impl Direction {
-    fn destination(&self, mut coords: Coords, distance: u16) -> Coords {
+    fn destination(&self, mut point: Point, distance: u16) -> Point {
         let [w, h] = *adb::DIMENSIONS.get().unwrap();
         match self {
-            Direction::Left => coords[0] = coords[0].saturating_sub(distance),
-            Direction::Right => coords[0] = coords[0].saturating_add(distance).min(w),
-            Direction::Up => coords[1] = coords[1].saturating_sub(distance),
-            Direction::Down => coords[1] = coords[1].saturating_add(distance).min(h),
+            Direction::Left => point[0] = point[0].saturating_sub(distance),
+            Direction::Right => point[0] = point[0].saturating_add(distance).min(w),
+            Direction::Up => point[1] = point[1].saturating_sub(distance),
+            Direction::Down => point[1] = point[1].saturating_add(distance).min(h),
         }
-        coords
+        point
     }
 }
 

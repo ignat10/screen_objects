@@ -8,7 +8,7 @@ use pyo3::prelude::{PyErr, PyResult};
 use stb_image::image;
 
 use crate::screen::{RGB_CHANNELS, RGBA_CHANNELS};
-use crate::{Coords, OBJECTS_DATA, OBJECTS_PATH, REGIONS_DATA, REGIONS_PATH, screen};
+use crate::{OBJECTS_DATA, OBJECTS_PATH, REGIONS_DATA, REGIONS_PATH, screen};
 
 pub(crate) fn rgba_into_rgb(rgba: Vec<u8>) -> Vec<u8> {
     assert_eq!(rgba.len() % 4, 0);
@@ -66,7 +66,7 @@ pub(super) fn load_image(path: &PathBuf) -> PyResult<Image> {
     }
 }
 
-pub(super) fn center_coords(top_left: Point, img: &Image) -> Coords {
+pub(super) fn center_point(top_left: Point, img: &Image) -> Point {
     let w = img.width();
     let h = img.height();
     let w_quarter = w / 4;
