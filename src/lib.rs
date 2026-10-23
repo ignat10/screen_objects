@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{LazyLock, OnceLock, RwLock};
+use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use pixen::*;
@@ -22,7 +23,6 @@ pub mod utils;
 use utils::*;
 
 const BASE_TOLERANCE: u8 = 5;
-const MINUTE: f32 = 60.0;
 
 #[pymodule]
 mod screen_objects {
@@ -292,8 +292,8 @@ struct ScreenObject {
 
 #[pymethods]
 impl ScreenObject {
-    #[pyo3(signature = (fixed = false, region = None, n = None))]
-    fn calibrate(&self, fixed: bool, region: Option<String>, n: Option<usize>) -> PyResult<()> {
+    #[pyo3(signature = (fixed = false, region = None, index = None))]
+    fn calibrate(&self, fixed: bool, region: Option<String>, index: Option<usize>) -> PyResult<()> {
         let screenshot = screen::get()?;
         let image = self.image()?;
         let raw_region = region
@@ -308,10 +308,10 @@ impl ScreenObject {
             })
             .transpose()?;
 
-        let (tolerance, point) = match (raw_region, n) {
-            (Some(region), Some(n)) => get_nth_tolerance_in_region(&screenshot, image, region, n),
+        let (tolerance, point) = match (raw_region, index) {
+            (Some(region), Some(index)) => get_nth_tolerance_in_region(&screenshot, image, region, index),
             (Some(region), None) => get_tolerance_in_region(&screenshot, image, region),
-            (None, Some(n)) => get_nth_tolerance(&screenshot, image, n),
+            (None, Some(index)) => get_nth_tolerance(&screenshot, image, index),
             (None, None) => get_tolerance(&screenshot, image),
         };
 
@@ -326,48 +326,66 @@ impl ScreenObject {
         save_objects()
     }
 
-    fn exists(&self) -> PyResult<bool> {
-        self.is_on_screen()
+    #[pyo3(signature = (timeout = 0.0, index = None))]
+    fn exists(&self, timeout: f32, index: Option<usize>) -> PyResult<bool> {
+        let start = Instant::now();
+        loop {
+            if self.is_on_screen(index)? {
+                return Ok(true);
+            }
+            if start.elapsed().as_secs_f32() > timeout {
+                return Ok(false);
+            }
+            screen::reset()
+        }
     }
 
-    fn tap(&self) -> PyResult<bool> {
-        if let Some(coords) = self.find_on_screen()? {
-            let center = center_point(coords, self.image()?);
+    #[pyo3(signature = (timeout = 0.0, index = None))]
+    fn force_exists(&self, timeout: f32, index: Option<usize>) -> PyResult<()> {
+        if !self.exists(timeout, index)? {
+            return Err(force_error(self.name()))
+        }
+        Ok(())
+    }
+
+    #[pyo3(signature = (timeout = 0.0, index = None, times = 1, interval = 0.0))]
+    fn tap(&self, timeout: f32, index: Option<usize>, times: u8, interval: f32) -> PyResult<bool> {
+        if times == 0 {
+            return Err(PyRuntimeError::new_err("tap requires at least one time"))
+        }
+        let interval = Duration::from_secs_f32(interval);
+        let start = Instant::now();
+        loop {
             check_python_signals()?;
-            adb::tap(center)?;
+            if let Some(point) = self.find_on_screen(index)? {
+                let center = center_point(point, self.image()?);
+                for i in 0..times {
+                    adb::tap(center)?;
+                    if i != times - 1 {
+                        sleep(interval);
+                    }
+                }
+                screen::reset();
+                return Ok(true);
+            }
+            if start.elapsed().as_secs_f32() > timeout {
+                return Ok(false);
+            }
             screen::reset();
-            Ok(true)
-        } else {
-            Ok(false)
         }
     }
 
-    fn force_tap(&self) -> PyResult<()> {
-        if !self.tap()? {
+    #[pyo3(signature = (timeout = 0.0, index = None, times = 1, interval = 0.0))]
+    fn force_tap(&self, timeout: f32, index: Option<usize>, times: u8, interval: f32) -> PyResult<()> {
+        if !self.tap(timeout, index, times, interval)? {
             return Err(force_error(self.name()));
         }
         Ok(())
     }
 
-    #[pyo3(signature = (timeout = MINUTE))]
-    fn waitap(&self, timeout: f32) -> PyResult<bool> {
-        if self.wait(timeout)? {
-            self.tap()
-        } else {
-            Ok(false)
-        }
-    }
-
-    #[pyo3(signature = (timeout = MINUTE))]
-    fn force_waitap(&self, timeout: f32) -> PyResult<()> {
-        if !self.waitap(timeout)? {
-            return Err(force_error(self.name()));
-        }
-        Ok(())
-    }
-
-    fn swipe(&self, dir: Direction, speed: SwipeSpeed, duration: f32) -> PyResult<bool> {
-        if let Some(start) = self.find_on_screen()? {
+    #[pyo3(signature = (dir, speed, duration, index = None))]
+    fn swipe(&self, dir: Direction, speed: SwipeSpeed, duration: f32, index: Option<usize>) -> PyResult<bool> {
+        if let Some(start) = self.find_on_screen(index)? {
             let distance = (speed.pixels_per_second() * duration) as u16;
             let end = dir.destination(start, distance);
             let time = (duration * 1000.0) as u16;
@@ -378,27 +396,9 @@ impl ScreenObject {
         }
     }
 
-    fn force_swipe(&self, dir: Direction, speed: SwipeSpeed, duration: f32) -> PyResult<()> {
-        if !self.swipe(dir, speed, duration)? {
-            return Err(force_error(self.name()));
-        }
-        Ok(())
-    }
-
-    fn tap_nth(&self, n: usize) -> PyResult<bool> {
-        if let Some(coords) = self.find_nth(n)? {
-            let center = center_point(coords, self.image()?);
-            check_python_signals()?;
-            adb::tap(center)?;
-            screen::reset();
-            Ok(true)
-        } else {
-            Ok(false)
-        }
-    }
-
-    fn force_tap_nth(&self, n: usize) -> PyResult<()> {
-        if !self.tap_nth(n)? {
+    #[pyo3(signature = (dir, speed, duration, index = None))]
+    fn force_swipe(&self, dir: Direction, speed: SwipeSpeed, duration: f32, index: Option<usize>) -> PyResult<()> {
+        if !self.swipe(dir, speed, duration, index)? {
             return Err(force_error(self.name()));
         }
         Ok(())
@@ -410,7 +410,7 @@ impl ScreenObject {
         let tolerance = self.tolerance;
 
         match self.location {
-            RawLocation::Point(_) => Err(self.coords_error()),
+            RawLocation::Point(_) => Err(self.point_error()),
             RawLocation::Region(region) => {
                 Ok(count_in_region(screenshot, image, region, tolerance))
             }
@@ -418,60 +418,17 @@ impl ScreenObject {
         }
     }
 
-    fn tap_each(&self) -> PyResult<()> {
+    fn tap_each(&self) -> PyResult<usize> {
         let image = self.image()?;
-        for point in self.find_all()? {
+        let points = self.find_all()?;
+        let len = points.len();
+        for point in points {
             let center = center_point(point, image);
             check_python_signals()?;
             adb::tap(center)?;
             screen::reset();
         }
-        Ok(())
-    }
-
-    fn spam_tap(&self, n: u8, interval: f32) -> PyResult<bool> {
-        if let Some(coords) = self.find_on_screen()? {
-            let image = self.image()?;
-            let center = center_point(coords, image);
-            for _ in 0..n {
-                adb::tap(center)?;
-                std::thread::sleep(Duration::from_secs_f32(interval));
-                check_python_signals()?;
-            }
-            screen::reset();
-            Ok(true)
-        } else {
-            Ok(false)
-        }
-    }
-
-    fn force_spam_tap(&self, n: u8, interval: f32) -> PyResult<()> {
-        if !self.spam_tap(n, interval)? {
-            return Err(force_error(self.name()));
-        }
-        Ok(())
-    }
-
-    #[pyo3(signature = (timeout = MINUTE))]
-    fn wait(&self, timeout: f32) -> PyResult<bool> {
-        let timeout = Duration::from_secs_f32(timeout);
-        let start = Instant::now();
-        while !self.exists()? {
-            if start.elapsed() > timeout {
-                return Ok(false);
-            }
-            check_python_signals()?;
-            screen::reset();
-        }
-        Ok(true)
-    }
-
-    #[pyo3(signature = (timeout = MINUTE))]
-    fn force_wait(&self, timeout: f32) -> PyResult<()> {
-        if !self.wait(timeout)? {
-            return Err(force_error(self.name()));
-        }
-        Ok(())
+        Ok(len)
     }
 }
 
@@ -531,7 +488,10 @@ impl ScreenObject {
         }
     }
 
-    fn is_on_screen(&self) -> PyResult<bool> {
+    fn is_on_screen(&self, index: Option<usize>) -> PyResult<bool> {
+        if let Some(n) = index {
+            return self.find_nth(n).map(|p| p.is_some())
+        }
         let screenshot = &screen::get()?;
         let image = self.image()?;
         let tolerance = self.tolerance;
@@ -543,10 +503,15 @@ impl ScreenObject {
         })
     }
 
-    fn find_on_screen(&self) -> PyResult<Option<Point>> {
+    fn find_on_screen(&self, index: Option<usize>) -> PyResult<Option<Point>> {
+        if let Some(n) = index {
+            return self.find_nth(n)
+        }
+
         let screenshot = screen::get()?;
         let image = self.image()?;
         let tolerance = self.tolerance;
+
 
         Ok(match self.location {
             RawLocation::Point(point) => {
@@ -561,16 +526,16 @@ impl ScreenObject {
         })
     }
 
-    fn find_nth(&self, n: usize) -> PyResult<Option<[u16; 2]>> {
+    fn find_nth(&self, index: usize) -> PyResult<Option<Point>> {
         let screenshot = screen::get()?;
         let image = self.image()?;
         let tolerance = self.tolerance;
         match self.location {
-            RawLocation::Point(_) => Err(self.coords_error()),
+            RawLocation::Point(_) => Err(self.point_error()),
             RawLocation::Region(region) => {
-                Ok(find_nth_in_region(&screenshot, image, region, tolerance, n))
+                Ok(find_nth_in_region(&screenshot, image, region, tolerance, index))
             }
-            RawLocation::Anywhere => Ok(find_nth(&screenshot, image, tolerance, n)),
+            RawLocation::Anywhere => Ok(find_nth(&screenshot, image, tolerance, index)),
         }
     }
 
@@ -580,7 +545,7 @@ impl ScreenObject {
         let tolerance = self.tolerance;
 
         match self.location {
-            RawLocation::Point(_) => Err(self.coords_error()),
+            RawLocation::Point(_) => Err(self.point_error()),
             RawLocation::Region(region) => {
                 Ok(find_all_in_region(&screenshot, image, region, tolerance))
             }
@@ -599,7 +564,7 @@ impl ScreenObject {
         self.path.file_stem().unwrap().to_str().unwrap()
     }
 
-    fn coords_error(&self) -> PyErr {
+    fn point_error(&self) -> PyErr {
         PyValueError::new_err(format!(
             "cannot use a multiple-position method on '{}': it has fixed coordinates",
             self.name()
@@ -637,16 +602,16 @@ mod tests {
     #[test]
     fn loads_alpha_location() {
         let obj = OBJECTS.get("alpha").unwrap();
-        let coords = obj.location;
+        let point = obj.location;
 
-        assert_eq!(coords, RawLocation::Point([100, 200]));
+        assert_eq!(point, RawLocation::Point([100, 200]));
     }
 
     #[test]
     fn loads_delta_location() {
         let obj = OBJECTS.get("delta").unwrap();
-        let coords = obj.location;
+        let point = obj.location;
 
-        assert_eq!(coords, RawLocation::Point([1, 1]));
+        assert_eq!(point, RawLocation::Point([1, 1]));
     }
 }

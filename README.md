@@ -1,32 +1,23 @@
 # screen_objects
 
-`screen_objects` is a Rust-powered Python module for Android screen automation. It finds saved image samples on the current device screen, then taps, swipes, waits for, counts, or calibrates those screen objects through ADB.
+`screen_objects` is a Python extension for Android UI automation. It finds saved image samples on
+the current device screen, then checks, taps, swipes, counts, and calibrates those screen objects
+through ADB.
 
-The project is built with [PyO3](https://pyo3.rs/) and [maturin](https://www.maturin.rs/). It exposes a Python extension module named `screen_objects` and also builds as a Rust library.
-
-## Features
-
-- Load template images from a samples directory.
-- Detect whether an object exists on the Android screen.
-- Tap, repeated-tap, tap every match, or tap the nth match.
-- Wait for an object to appear and tap it.
-- Raise an error and save a diagnostic screenshot when a required object is not found.
-- Swipe from a detected object in a chosen direction and speed.
-- Calibrate objects and optional screen regions.
-- Cache screenshots until an action changes the screen.
-- Save calibration data to JSON files next to your sample directories.
+It is implemented in Rust with [PyO3](https://pyo3.rs/) and built with
+[maturin](https://www.maturin.rs/).
 
 ## Requirements
 
-- Python 3.8 or newer.
-- Rust nightly, as configured in `rust-toolchain.toml`.
-- `maturin` for building/installing the Python module.
-- Android Debug Bridge (`adb`).
-- An Android device or emulator with USB debugging or wireless debugging enabled.
+- Python 3.8 or newer
+- Rust nightly, as configured in `rust-toolchain.toml`
+- [maturin](https://www.maturin.rs/)
+- Android Debug Bridge (`adb`)
+- An Android device or emulator with USB or wireless debugging enabled
 
-## Installation
+## Install
 
-For local development, create or activate a Python environment and install the module in editable mode:
+For local development:
 
 ```bash
 pip install maturin
@@ -39,159 +30,194 @@ To build a wheel:
 maturin build --release
 ```
 
-## Basic Usage
+## Quick start
 
-Create a directory of image samples. Each file name becomes the key for a `ScreenObject`.
+Put reference images in an objects directory. Each filename stem becomes an object name.
 
 ```text
 assets/
   objects/
     start_button.png
     close_icon.png
-    reward_badge.png
-  regions/
-    main_panel.png
 ```
 
-Then configure ADB and load the objects:
+Configure the device before performing any device operation, then load the objects:
 
 ```python
 from pathlib import Path
 
-from screen_objects import (
-    Direction,
-    SwipeSpeed,
-    device_config,
-    get_objects,
-    get_regions,
-)
+from screen_objects import Direction, SwipeSpeed, device_config, get_objects
 
-device_config(Path("/path/to/adb"), serial="emulator-5554")
+device_config(serial="emulator-5554")
+objects = get_objects(Path("assets/objects"))
 
-regions = get_regions(Path("assets/regions"))
-objects = get_objects(Path("assets/objects"), Path("assets/regions"))
+if objects["start_button"].tap(timeout=10.0):
+    objects["close_icon"].swipe(Direction.Left, SwipeSpeed.Normal, duration=0.4)
+```
 
+`device_config()` uses `adb` from `PATH` by default. Pass the executable path when necessary:
+
+```python
+device_config(Path("/path/to/adb"), serial="192.168.1.20:5555")
+```
+
+Use the serial shown by `adb devices` when more than one device is connected.
+
+## Samples and calibration
+
+`get_objects(path)` loads every image below `path` and returns a dictionary of `ScreenObject`
+instances. Image stems must be unique, including across subdirectories. The function creates or
+updates `objects.json` next to the objects directory to store calibration data.
+
+By default, an object is searched for anywhere on the screen. Calibrating it can improve matching:
+
+```python
 objects["start_button"].calibrate()
-
-if objects["start_button"].exists():
-    objects["start_button"].tap()
-
-objects["reward_badge"].waitap(timeout=10.0)
-objects["close_icon"].swipe(Direction.Left, SwipeSpeed.Normal, duration=0.4)
 ```
 
-Pass the device serial reported by `adb devices` to select a specific device:
+Calibrate while the object is visible. This records a matching tolerance and continues to search
+the whole screen. Use `fixed=True` when the object always occupies the same screen position:
 
 ```python
-device_config(Path("/path/to/adb"), serial="emulator-5554")
+objects["close_icon"].calibrate(fixed=True)
 ```
 
-For a wirelessly connected device, the serial is typically an address with a port, such as
-`"192.168.1.20:5555"`.
+### Regions
 
-## Calibration Data
-
-`get_objects()` scans a directory and returns a dictionary of `ScreenObject` instances. It also creates or updates an `objects.json` file next to the objects directory.
-
-For example, loading `assets/objects` stores object calibration data at:
-
-```text
-assets/objects.json
-```
-
-`get_regions()` does the same for regions and stores data at:
-
-```text
-assets/regions.json
-```
-
-Object calibration records:
-
-- fixed coordinates, when `calibrate(fixed=True)` is used.
-- an optional region name, when `calibrate(region="name")` is used.
-- the image matching tolerance.
-
-Regions must be calibrated before objects can reliably use them:
+Regions constrain object matching to part of the screen. Store their reference images separately,
+calibrate the region first, then load objects with the same regions directory:
 
 ```python
-regions = get_regions(Path("assets/regions"))
+from screen_objects import get_regions
+
+regions_dir = Path("assets/regions")
+objects_dir = Path("assets/objects")
+
+regions = get_regions(regions_dir)
 regions["main_panel"].calibrate()
 
-objects = get_objects(Path("assets/objects"), Path("assets/regions"))
+objects = get_objects(objects_dir, regions_dir)
 objects["reward_badge"].calibrate(region="main_panel")
 ```
 
-## Python API
+Region data is saved as `regions.json` beside the regions directory. Call `get_regions()` before
+`get_objects()` when an application needs both collections.
 
-### Module Functions
+## Matching and actions
+
+Lookups use a cached screenshot. Actions that change the device through this module clear that
+cache. If the screen changes outside this module, call `reset_screen()` before the next lookup.
+
+`timeout` is measured in seconds. The default, `0.0`, performs an immediate lookup. A positive
+value waits for a match until the timeout expires.
+
+`index` selects a specific match and is zero-based: `index=0` selects the first match. It can be
+used with `exists()`, `tap()`, `swipe()`, and `calibrate()`. Objects calibrated with
+`fixed=True` have one known position, so they do not support `index`, `count()`, or
+`tap_each()`.
+
+```python
+# Check for a match for up to five seconds.
+if objects["reward_badge"].exists(timeout=5.0):
+    # Tap the second match three times, waiting 0.2 seconds between taps.
+    objects["reward_badge"].tap(index=1, times=3, interval=0.2)
+
+# Tap every match in the current screenshot and receive the number tapped.
+tapped = objects["collect_button"].tap_each()
+```
+
+### Required actions
+
+Every lookup or action that can return `False` has a `force_*` form. It raises `RuntimeError` and
+saves the current screenshot to `screen-<device-serial>.png` when no match is found.
+
+```python
+objects["start_button"].force_tap(timeout=10.0)
+objects["close_icon"].force_exists()
+```
+
+## API reference
+
+### Object loading
 
 ```python
 get_objects(objects_dir: Path, regions_dir: Path | None = None) -> dict[str, ScreenObject]
 get_regions(regions_dir: Path) -> dict[str, ScreenRegion]
-device_config(adb: Path = Path("adb"), serial: str | None = None, app: str | None = None) -> None
+```
+
+### `ScreenObject`
+
+```python
+exists(timeout: float = 0.0, index: int | None = None) -> bool
+force_exists(timeout: float = 0.0, index: int | None = None) -> None
+
+tap(
+    timeout: float = 0.0,
+    index: int | None = None,
+    times: int = 1,
+    interval: float = 0.0,
+) -> bool
+force_tap(
+    timeout: float = 0.0,
+    index: int | None = None,
+    times: int = 1,
+    interval: float = 0.0,
+) -> None
+
+swipe(
+    dir: Direction,
+    speed: SwipeSpeed,
+    duration: float,
+    index: int | None = None,
+) -> bool
+force_swipe(
+    dir: Direction,
+    speed: SwipeSpeed,
+    duration: float,
+    index: int | None = None,
+) -> None
+
+count() -> int
+tap_each() -> int
+calibrate(
+    fixed: bool = False,
+    region: str | None = None,
+    index: int | None = None,
+) -> None
+```
+
+`tap()` returns `False` if the object is not found before `timeout`. `times` must be at least one;
+`interval` is the delay between repeated taps. `swipe()` begins at the matched point and returns
+`False` when there is no match. `count()` returns the number of current matches, and
+`tap_each()` returns the number of taps sent.
+
+### Device functions
+
+```python
+device_config(
+    adb: Path = Path("adb"),
+    serial: str | None = None,
+    app: str | None = None,
+) -> None
 start_app() -> None
 close_app() -> None
+
 reset_screen() -> None
+screenshot() -> None
 tap_center() -> None
 swipe_center(dir: Direction, speed: SwipeSpeed, duration: float) -> None
-screenshot() -> None
 back() -> None
 home() -> None
 write(text: str) -> None
 ```
 
-`screenshot()` writes the current device screenshot to `screen-<device-serial>.png`. Characters
-that are not portable in filenames are replaced with underscores.
+Pass `app` to `device_config()` to select an Android package by name. `start_app()` launches it,
+and `close_app()` force-stops it.
 
-`reset_screen()` clears the cached screenshot so the next lookup captures a fresh screen.
-
-`tap_center()` taps the center of the configured Android device screen and resets the screenshot cache.
-
-`swipe_center()` swipes from the center of the configured Android device screen in the requested direction and resets the screenshot cache.
-
-`back()` sends Android's back key event and resets the screenshot cache.
-
-`home()` sends Android's home key event and resets the screenshot cache.
-
-`write()` enters text into the focused field using Android's `input text` command and resets the screenshot cache.
-
-Pass `app` to `device_config()` to configure an Android package by name. `start_app()` and
-`close_app()` then start and force-stop that package.
-
-Pass `serial` to select a device from the output of `adb devices`.
-
-### ScreenObject
-
-```python
-exists() -> bool
-tap() -> bool
-force_tap() -> None
-waitap(timeout: float = 60.0) -> bool
-force_waitap(timeout: float = 60.0) -> None
-swipe(dir: Direction, speed: SwipeSpeed, duration: float) -> bool
-force_swipe(dir: Direction, speed: SwipeSpeed, duration: float) -> None
-tap_nth(n: int) -> bool
-force_tap_nth(n: int) -> None
-count() -> int
-tap_each() -> None
-spam_tap(n: int, interval: float) -> bool
-force_spam_tap(n: int, interval: float) -> None
-wait(timeout: float = 60.0) -> bool
-force_wait(timeout: float = 60.0) -> None
-calibrate(fixed: bool = False, region: str | None = None, n: int | None = None) -> None
-debug(point: Sequence[int]) -> None
-```
-
-Methods that return `bool` return `False` when the object is not found before acting.
-
-`force_*` variants raise `RuntimeError` instead of returning `False`. They save the current
-screen to `screen-<device-serial>.png` to help diagnose a missing object.
-
-### ScreenRegion
-
-```python
-calibrate() -> None
-```
+`screenshot()` saves the cached or newly captured screen to `screen-<device-serial>.png`.
+`tap_center()`, `swipe_center()`, `back()`, and `home()` send their respective device action.
+`write()` enters text into the focused Android field. Call `reset_screen()` after an external or
+text-entry action when a fresh lookup is needed.
 
 ### Enums
 
@@ -215,10 +241,8 @@ Run Rust tests with:
 cargo test
 ```
 
-Build the Python extension locally with:
+Build the extension into the active Python environment with:
 
 ```bash
 maturin develop
 ```
-
-The release workflow builds wheels on tagged pushes matching `v*`.

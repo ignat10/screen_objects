@@ -76,12 +76,12 @@ pub(super) fn center_point(top_left: Point, img: &Image) -> Point {
     [top_left[0] + rand_w, top_left[1] + rand_h]
 }
 
-pub(super) fn force_error(name: &str) -> PyErr {
+pub(super) fn force_error(object_name: &str) -> PyErr {
     if let Err(e) = screen::save() {
         return e;
     }
     let filename = screen::filename().unwrap_or_else(|_| "screen.png".to_string());
     PyRuntimeError::new_err(format!(
-        "Called force method on {name} object, but it was not found.\nCheck log {filename}"
+        "Called force method on {object_name} object, but it was not found.\nCheck log {filename}"
     ))
 }
