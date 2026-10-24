@@ -1,13 +1,17 @@
+
 [build-system]
 requires = ["maturin>=1.12"]
 build-backend = "maturin"
 
 [project]
 name = "screen-objects"
-requires-python = ">=3.8"
+description = "Python library for detecting and interacting with objects on Android screenshots"
+readme = "README.md"
+requires-python = ">=3.14"
 classifiers = [
     "Programming Language :: Rust",
+    "Programming Language :: Python :: 3.14",
     "Programming Language :: Python :: Implementation :: CPython",
-    "Programming Language :: Python :: Implementation :: PyPy",
+    "Operating System :: Microsoft :: Windows",
 ]
 dynamic = ["version"]
