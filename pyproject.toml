@@ -3,7 +3,7 @@ requires = ["maturin>=1.12"]
 build-backend = "maturin"
 
 [project]
-name = "screen_objects"
+name = "screen-objects"
 requires-python = ">=3.8"
 classifiers = [
     "Programming Language :: Rust",
