@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::process::{Command, Output};
 use std::sync::OnceLock;
 use pixen::Point;
+use crate::screen::RGBA_CHANNELS;
 
 static ADB: OnceLock<PathBuf> = OnceLock::new();
 pub(crate) static DEVICE_SERIAL: OnceLock<String> = OnceLock::new();
@@ -155,8 +156,8 @@ pub(crate) fn screencap() -> PyResult<(u32, u32, Vec<u8>)> {
         .try_into()
         .map_err(|v| PyBufferError::new_err(format!("Expected: width, height, found {:?}", v)))?;
 
-    if output.len() % 4 != 0 {
-        return screencap();
+    if output.len() != usize::try_from(width * height)? * RGBA_CHANNELS  {
+        return Err(PyBufferError::new_err("adb screencap buffer error. probably keyboard interrupts or device disconnected."));
     }
 
     Ok((width, height, output))
