@@ -186,8 +186,9 @@ calibrate(
 ) -> None
 ```
 
-`tap()` returns `False` if the object is not found before `timeout`. `times` must be at least one;
-`interval` is the delay between repeated taps. `swipe()` begins at the matched point and returns
+`tap()` returns `False` if the object is not found before `timeout`. `times=0` performs no taps
+and returns `True` when the object is found; `interval` is the delay between repeated taps.
+`swipe()` begins at the matched point and returns
 `False` when there is no match. `count()` returns the number of current matches, and
 `tap_each()` returns the number of taps sent.
 
