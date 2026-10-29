@@ -11,7 +11,11 @@ use pixen::Point;
 static ADB: OnceLock<PathBuf> = OnceLock::new();
 pub(crate) static DEVICE_SERIAL: OnceLock<String> = OnceLock::new();
 static APP: OnceLock<String> = OnceLock::new();
-pub(crate) static DIMENSIONS: OnceLock<Point> = OnceLock::new();
+static DIMENSIONS: OnceLock<Point> = OnceLock::new();
+
+pub(crate) fn get_dimensions() -> PyResult<Point> {
+    DIMENSIONS.get().ok_or_else(|| PyValueError::new_err("Dimensions not set. Call device_config before.")).cloned()
+}
 
 #[pyfunction]
 #[pyo3(signature = (adb = PathBuf::from("adb"), serial = None, app = None))]

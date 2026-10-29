@@ -52,9 +52,7 @@ mod screen_objects {
 
     #[pyfunction]
     fn tap_center() -> PyResult<()> {
-        let [w, h] = adb::DIMENSIONS.get().copied().ok_or_else(|| {
-            PyRuntimeError::new_err("device_config must be called before tap_center")
-        })?;
+        let [w, h] = adb::get_dimensions()?;
 
         adb::tap([w / 2, h / 2])?;
         screen::reset();
@@ -63,13 +61,11 @@ mod screen_objects {
 
     #[pyfunction]
     fn swipe_center(dir: Direction, speed: SwipeSpeed, duration: f32) -> PyResult<()> {
-        let [w, h] = adb::DIMENSIONS.get().copied().ok_or_else(|| {
-            PyRuntimeError::new_err("device_config must be called before swipe_center")
-        })?;
+        let [w, h] = adb::get_dimensions()?;
 
         let start = [w / 2, h / 2];
         let distance = (speed.pixels_per_second() * duration) as u16;
-        let end = dir.destination(start, distance);
+        let end = dir.destination(start, distance)?;
         let time = (duration * 1000.0) as u16;
         screen::reset();
         adb::swipe(start, end, time)
@@ -387,7 +383,7 @@ impl ScreenObject {
     fn swipe(&self, dir: Direction, speed: SwipeSpeed, duration: f32, index: Option<usize>) -> PyResult<bool> {
         if let Some(start) = self.find_on_screen(index)? {
             let distance = (speed.pixels_per_second() * duration) as u16;
-            let end = dir.destination(start, distance);
+            let end = dir.destination(start, distance)?;
             let time = (duration * 1000.0) as u16;
             screen::reset();
             adb::swipe(start, end, time).map(|()| true)
@@ -446,15 +442,15 @@ enum Direction {
 }
 
 impl Direction {
-    fn destination(&self, mut point: Point, distance: u16) -> Point {
-        let [w, h] = *adb::DIMENSIONS.get().unwrap();
+    fn destination(&self, mut point: Point, distance: u16) -> PyResult<Point> {
+        let [w, h] = adb::get_dimensions()?;
         match self {
             Direction::Left => point[0] = point[0].saturating_sub(distance),
             Direction::Right => point[0] = point[0].saturating_add(distance).min(w),
             Direction::Up => point[1] = point[1].saturating_sub(distance),
             Direction::Down => point[1] = point[1].saturating_add(distance).min(h),
         }
-        point
+        Ok(point)
     }
 }
 
