@@ -346,9 +346,6 @@ impl ScreenObject {
 
     #[pyo3(signature = (timeout = 0.0, index = None, times = 1, interval = 0.0))]
     fn tap(&self, timeout: f32, index: Option<usize>, times: u8, interval: f32) -> PyResult<bool> {
-        if times == 0 {
-            return Err(PyRuntimeError::new_err("tap requires at least one time"))
-        }
         let interval = Duration::from_secs_f32(interval);
         let start = Instant::now();
         loop {
