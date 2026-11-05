@@ -35,8 +35,13 @@ jobs:
 
       - name: Build Linux wheel
         if: runner.os == 'Linux'
-        run: maturin build --release --out dist --manylinux 2014
-
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          args: --release --out dist -i python3.14
+          manylinux: 2014
+          rust-toolchain: nightly
+  
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
         with:
