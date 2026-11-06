@@ -12,6 +12,7 @@ use crate::screen::RGBA_CHANNELS;
 static ADB: OnceLock<PathBuf> = OnceLock::new();
 pub(crate) static DEVICE_SERIAL: OnceLock<String> = OnceLock::new();
 static APP: OnceLock<String> = OnceLock::new();
+static ACTIVITY: OnceLock<String> = OnceLock::new();
 static DIMENSIONS: OnceLock<Point> = OnceLock::new();
 
 pub(crate) fn get_dimensions() -> PyResult<Point> {
@@ -56,7 +57,9 @@ pub(super) fn device_config(
     DIMENSIONS.set(size).unwrap(); // if DEVICE_SERIAL.set() is Ok, then this also
     if let Some(a) = app {
         let package = find_package(a)?;
+        let activity = find_activity(&package)?;
         APP.set(package).unwrap();
+        ACTIVITY.set(activity).unwrap();
     }
     Ok(())
 }
@@ -81,35 +84,55 @@ fn parse_size(size_output: &str) -> PyResult<Point> {
 fn find_package(name: String) -> PyResult<String> {
     let output = device_action(&["shell", "pm", "list", "packages"])?;
     let packages = String::from_utf8_lossy(&output.stdout);
-    for line in packages.lines() {
-        let package = line
-            .strip_prefix("package:")
-            .ok_or_else(|| PyBufferError::new_err("line is not starting with package: "))?;
-        if package.contains(&name) {
-            return Ok(package.into());
-        }
-    }
-    Err(PyValueError::new_err(format!(
-        "Package '{}' not found",
-        name
-    )))
+
+    packages
+        .lines()
+        .filter_map(|line| line.strip_prefix("package:"))
+        .find(|&package| package.contains(&name))
+        .map(String::from)
+        .ok_or_else(|| {
+            PyValueError::new_err(format!("Package '{}' not found", name))
+        })
+}
+
+fn find_activity(package: &str) -> PyResult<String> {
+    let output = device_action(&[
+        "shell",
+        "cmd",
+        "package",
+        "resolve-activity",
+        "--brief",
+        package,
+    ])?;
+
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .nth(1)
+        .filter(|line| line.contains('/'))
+        .map(|line| line.trim().to_string())
+        .ok_or_else(|| {
+            PyValueError::new_err(format!(
+                "Activity not found for '{}'",
+                package
+            ))
+        })
 }
 
 #[pyfunction]
 pub(super) fn start_app() -> PyResult<()> {
-    let name = APP.get().ok_or_else(|| {
+    let activity = ACTIVITY.get().ok_or_else(|| {
         PyValueError::new_err(
-            "App name not set. Call device_config with app argument before this function.",
+            "App name not set. Call device_config with app argument before start_app().",
         )
     })?;
-    device_action(&["shell", "monkey", "-p", name, "1"]).map(|_| ())
+    device_action(&["shell", "am", "start", "-n", activity]).map(|_| ())
 }
 
 #[pyfunction]
 pub(super) fn close_app() -> PyResult<()> {
     let name = APP.get().ok_or_else(|| {
         PyValueError::new_err(
-            "App name not set. Call device_config with app argument before this function.",
+            "App name not set. Call device_config with app argument before close_app().",
         )
     })?;
     device_action(&["shell", "am", "force-stop", name]).map(|_| ())
