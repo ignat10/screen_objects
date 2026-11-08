@@ -61,7 +61,9 @@ if objects["start_button"].tap(timeout=10.0):
 device_config(Path("/path/to/adb"), serial="192.168.1.20:5555")
 ```
 
-Use the serial shown by `adb devices` when more than one device is connected.
+When `serial` is set, `device_config()` runs `adb connect` once and errors if that device is not
+ready. When `serial` is omitted, exactly one ready device must appear in `adb devices`; otherwise
+pass `serial` explicitly.
 
 ## Samples and calibration
 
@@ -212,8 +214,10 @@ home() -> None
 write(text: str) -> None
 ```
 
-Pass `app` to `device_config()` to select an Android package by name. `start_app()` launches it,
-and `close_app()` force-stops it.
+`device_config()` must be called before other device operations. With `serial`, it connects once via
+`adb connect` and fails if the device is missing. Without `serial`, it requires exactly one ready
+device. Pass `app` to select an Android package by name; `start_app()` launches it, and
+`close_app()` force-stops it.
 
 `screenshot()` saves the cached or newly captured screen to `screen-<device-serial>.png`.
 `tap_center()`, `swipe_center()`, `back()`, and `home()` send their respective device action.

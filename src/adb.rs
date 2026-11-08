@@ -2,7 +2,7 @@ use pyo3::exceptions::{
     PyBufferError, PyConnectionAbortedError, PyConnectionError, PyOSError, PyRuntimeError,
     PyValueError,
 };
-use pyo3::prelude::{PyResult, Python, pyfunction};
+use pyo3::prelude::{PyResult, pyfunction};
 use std::path::PathBuf;
 use std::process::{Command, Output};
 use std::sync::OnceLock;
@@ -26,32 +26,36 @@ pub(super) fn device_config(
     serial: Option<String>,
     app: Option<String>,
 ) -> PyResult<()> {
-    println!("connecting adb device...");
     ADB.set(adb)
         .map_err(|_| PyRuntimeError::new_err("device_config function can only be called once."))?;
 
-    let device;
-    if let Some(serial) = serial {
-        loop {
-            Python::attach(|py| py.check_signals())?;
-            if scan()?.contains(&serial) {
-                device = serial;
-                break;
-            }
+    let device = if let Some(serial) = serial {
+        connect(&serial)?;
+        if !scan()?.contains(&serial) {
+            return Err(PyConnectionError::new_err(format!(
+                "Failed to connect to '{serial}'."
+            )));
         }
+        serial
     } else {
-        loop {
-            if let Some(serial) = scan()?.first() {
-                device = serial.to_string();
-                break;
+        let mut devices = scan()?;
+        match devices.len() {
+            1 => devices.pop().unwrap(),
+            0 => {
+                return Err(PyConnectionError::new_err("No adb device found."));
+            }
+            n => {
+                return Err(PyConnectionError::new_err(format!(
+                    "Expected exactly one adb device, found {n}: {}, call device_config with serial argument",
+                    devices.join(", ")
+                )));
             }
         }
-    }
+    };
 
     DEVICE_SERIAL
         .set(device)
         .map_err(|_| PyRuntimeError::new_err("device_config function can only be called once."))?;
-    println!("device connected");
 
     let size = size()?;
     DIMENSIONS.set(size).unwrap(); // if DEVICE_SERIAL.set() is Ok, then this also
@@ -62,6 +66,10 @@ pub(super) fn device_config(
         ACTIVITY.set(activity).unwrap();
     }
     Ok(())
+}
+
+fn connect(serial: &str) -> PyResult<()> {
+    run(&["connect", serial]).map(|_| ())
 }
 
 fn size() -> PyResult<Point> {
