@@ -2,10 +2,12 @@ use pyo3::exceptions::{
     PyBufferError, PyConnectionAbortedError, PyConnectionError, PyOSError, PyRuntimeError,
     PyValueError,
 };
-use pyo3::prelude::{PyResult, pyfunction};
+use pyo3::prelude::{PyResult, Python, pyfunction};
 use std::path::PathBuf;
 use std::process::{Command, Output};
 use std::sync::OnceLock;
+use std::thread::sleep;
+use std::time::Duration;
 use pixen::Point;
 use crate::screen::RGBA_CHANNELS;
 
@@ -56,6 +58,8 @@ pub(super) fn device_config(
     DEVICE_SERIAL
         .set(device)
         .map_err(|_| PyRuntimeError::new_err("device_config function can only be called once."))?;
+    device_action(&["wait-for-device"])?;
+    wait_for_boot()?;
 
     let size = size()?;
     DIMENSIONS.set(size).unwrap(); // if DEVICE_SERIAL.set() is Ok, then this also
@@ -70,6 +74,14 @@ pub(super) fn device_config(
 
 fn connect(serial: &str) -> PyResult<()> {
     run(&["connect", serial]).map(|_| ())
+}
+
+fn wait_for_boot() -> PyResult<()> {
+    while String::from_utf8_lossy(&device_action(&["shell", "getprop", "sys.boot_completed"])?.stdout).trim() != "1" {
+        Python::attach(|py| py.check_signals())?;
+        sleep(Duration::from_secs(1));
+    }
+    Ok(())
 }
 
 fn size() -> PyResult<Point> {

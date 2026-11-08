@@ -62,8 +62,9 @@ device_config(Path("/path/to/adb"), serial="192.168.1.20:5555")
 ```
 
 When `serial` is set, `device_config()` runs `adb connect` once and errors if that device is not
-ready. When `serial` is omitted, exactly one ready device must appear in `adb devices`; otherwise
-pass `serial` explicitly.
+listed. When `serial` is omitted, exactly one ready device must appear in `adb devices`; otherwise
+pass `serial` explicitly. It then runs `adb wait-for-device` and waits until
+`sys.boot_completed` is `1`.
 
 ## Samples and calibration
 
@@ -216,8 +217,8 @@ write(text: str) -> None
 
 `device_config()` must be called before other device operations. With `serial`, it connects once via
 `adb connect` and fails if the device is missing. Without `serial`, it requires exactly one ready
-device. Pass `app` to select an Android package by name; `start_app()` launches it, and
-`close_app()` force-stops it.
+device. It then waits with `adb wait-for-device` and until `sys.boot_completed` is `1`. Pass `app`
+to select an Android package by name; `start_app()` launches it, and `close_app()` force-stops it.
 
 `screenshot()` saves the cached or newly captured screen to `screen-<device-serial>.png`.
 `tap_center()`, `swipe_center()`, `back()`, and `home()` send their respective device action.
