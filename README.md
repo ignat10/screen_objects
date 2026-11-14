@@ -203,7 +203,7 @@ device_config(
     serial: str | None = None,
     app: str | None = None,
 ) -> None
-start_app() -> None
+start_app(args: list[str] | None = None) -> None
 close_app() -> None
 
 reset_screen() -> None
@@ -219,6 +219,8 @@ write(text: str) -> None
 `adb connect` and fails if the device is missing. Without `serial`, it requires exactly one ready
 device. It then waits with `adb wait-for-device` and until `sys.boot_completed` is `1`. Pass `app`
 to select an Android package by name; `start_app()` launches it, and `close_app()` force-stops it.
+Optionally pass `start_app()` a list of extra arguments for Android's `am start` command, such as
+`start_app(args=["-W"])` to wait for the launch to complete.
 
 `screenshot()` saves the cached or newly captured screen to `screen-<device-serial>.png`.
 `tap_center()`, `swipe_center()`, `back()`, and `home()` send their respective device action.

@@ -139,13 +139,18 @@ fn find_activity(package: &str) -> PyResult<String> {
 }
 
 #[pyfunction]
-pub(super) fn start_app() -> PyResult<()> {
+#[pyo3(signature = (args = None))]
+pub(super) fn start_app(args: Option<Vec<String>>) -> PyResult<()> {
     let activity = ACTIVITY.get().ok_or_else(|| {
         PyValueError::new_err(
             "App name not set. Call device_config with app argument before start_app().",
         )
     })?;
-    device_action(&["shell", "am", "start", "-n", activity]).map(|_| ())
+    let mut cmd: Vec<&str> = vec!["shell", "am", "start", "-n", activity];
+    if let Some(extra) = args.as_ref() {
+        cmd.extend(extra.iter().map(String::as_str));
+    }
+    device_action(&cmd).map(|_| ())
 }
 
 #[pyfunction]
