@@ -1,11 +1,6 @@
 from pathlib import Path
 from typing import ClassVar
 
-class Direction:
-    Left: ClassVar[Direction]
-    Right: ClassVar[Direction]
-    Up: ClassVar[Direction]
-    Down: ClassVar[Direction]
 
 class SwipeSpeed:
     Slow: ClassVar[SwipeSpeed]
@@ -35,11 +30,11 @@ class ScreenObject:
     ) -> None: ...
 
     def swipe(
-        self, dir: Direction, speed: SwipeSpeed, duration: float, index: int | None = None
+        self, angle: float, speed: SwipeSpeed, duration: float, index: int | None = None
     ) -> bool: ...
 
     def force_swipe(
-        self, dir: Direction, speed: SwipeSpeed, duration: float, index: int | None = None
+        self, angle: float, speed: SwipeSpeed, duration: float, index: int | None = None
     ) -> None: ...
 
     def count(self) -> int: ...
@@ -74,7 +69,7 @@ def reset_screen() -> None: ...
 
 def tap_center() -> None: ...
 
-def swipe_center(dir: Direction, speed: SwipeSpeed, duration: float) -> None: ...
+def swipe_center(angle: float, speed: SwipeSpeed, duration: float) -> None: ...
 
 def screenshot() -> None: ...
 

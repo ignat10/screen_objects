@@ -60,12 +60,12 @@ mod screen_objects {
     }
 
     #[pyfunction]
-    fn swipe_center(dir: Direction, speed: SwipeSpeed, duration: f32) -> PyResult<()> {
+    fn swipe_center(angle: f32, speed: SwipeSpeed, duration: f32) -> PyResult<()> {
         let [w, h] = adb::get_dimensions()?;
 
         let start = [w / 2, h / 2];
         let distance = (speed.pixels_per_second() * duration) as u16;
-        let end = dir.destination(start, distance)?;
+        let end = swipe_destination(start, distance, angle, [w, h]);
         let time = (duration * 1000.0) as u16;
         screen::reset();
         adb::swipe(start, end, time)
@@ -98,9 +98,6 @@ mod screen_objects {
     fn write(text: &str) -> PyResult<()> {
         adb::write(text)
     }
-
-    #[pymodule_export]
-    use Direction;
 
     #[pymodule_export]
     use SwipeSpeed;
@@ -376,11 +373,18 @@ impl ScreenObject {
         Ok(())
     }
 
-    #[pyo3(signature = (dir, speed, duration, index = None))]
-    fn swipe(&self, dir: Direction, speed: SwipeSpeed, duration: f32, index: Option<usize>) -> PyResult<bool> {
+    #[pyo3(signature = (angle, speed, duration, index = None))]
+    fn swipe(
+        &self,
+        angle: f32,
+        speed: SwipeSpeed,
+        duration: f32,
+        index: Option<usize>,
+    ) -> PyResult<bool> {
         if let Some(start) = self.find_on_screen(index)? {
             let distance = (speed.pixels_per_second() * duration) as u16;
-            let end = dir.destination(start, distance)?;
+            let dimensions = adb::get_dimensions()?;
+            let end = swipe_destination(start, distance, angle, dimensions);
             let time = (duration * 1000.0) as u16;
             screen::reset();
             adb::swipe(start, end, time).map(|()| true)
@@ -389,9 +393,15 @@ impl ScreenObject {
         }
     }
 
-    #[pyo3(signature = (dir, speed, duration, index = None))]
-    fn force_swipe(&self, dir: Direction, speed: SwipeSpeed, duration: f32, index: Option<usize>) -> PyResult<()> {
-        if !self.swipe(dir, speed, duration, index)? {
+    #[pyo3(signature = (angle, speed, duration, index = None))]
+    fn force_swipe(
+        &self,
+        angle: f32,
+        speed: SwipeSpeed,
+        duration: f32,
+        index: Option<usize>,
+    ) -> PyResult<()> {
+        if !self.swipe(angle, speed, duration, index)? {
             return Err(force_error(self.name()));
         }
         Ok(())
@@ -425,30 +435,18 @@ impl ScreenObject {
     }
 }
 
-fn check_python_signals() -> PyResult<()> {
-    Python::attach(|py| py.check_signals())
-}
-
-#[pyclass(from_py_object)]
-#[derive(Copy, Clone)]
-enum Direction {
-    Left,
-    Right,
-    Up,
-    Down,
-}
-
-impl Direction {
-    fn destination(&self, mut point: Point, distance: u16) -> PyResult<Point> {
-        let [w, h] = adb::get_dimensions()?;
-        match self {
-            Direction::Left => point[0] = point[0].saturating_sub(distance),
-            Direction::Right => point[0] = point[0].saturating_add(distance).min(w),
-            Direction::Up => point[1] = point[1].saturating_sub(distance),
-            Direction::Down => point[1] = point[1].saturating_add(distance).min(h),
-        }
-        Ok(point)
-    }
+fn swipe_destination(
+    point: Point,
+    distance: u16,
+    angle_degrees: f32,
+    [width, height]: Point,
+) -> Point {
+    let radians = angle_degrees.rem_euclid(360.0).to_radians();
+    let dx = (radians.sin() * f32::from(distance)).round() as i32;
+    let dy = (-radians.cos() * f32::from(distance)).round() as i32;
+    let x = (i32::from(point[0]) + dx).clamp(0, i32::from(width)) as u16;
+    let y = (i32::from(point[1]) + dy).clamp(0, i32::from(height)) as u16;
+    [x, y]
 }
 
 #[pyclass(from_py_object)]
@@ -606,5 +604,32 @@ mod tests {
         let point = obj.location;
 
         assert_eq!(point, RawLocation::Point([1, 1]));
+    }
+
+    #[test]
+    fn swipe_angles_follow_screen_coordinates() {
+        let dimensions = [200, 200];
+        let start = [100, 100];
+
+        assert_eq!(
+            swipe_destination(start, 10, 0.0, dimensions),
+            [100, 90]
+        );
+        assert_eq!(
+            swipe_destination(start, 10, 90.0, dimensions),
+            [110, 100]
+        );
+        assert_eq!(
+            swipe_destination(start, 10, 180.0, dimensions),
+            [100, 110]
+        );
+        assert_eq!(
+            swipe_destination(start, 10, 270.0, dimensions),
+            [90, 100]
+        );
+        assert_eq!(
+            swipe_destination(start, 10, 360.0, dimensions),
+            [100, 90]
+        );
     }
 }

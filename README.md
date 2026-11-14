@@ -46,13 +46,13 @@ Configure the device before performing any device operation, then load the objec
 ```python
 from pathlib import Path
 
-from screen_objects import Direction, SwipeSpeed, device_config, get_objects
+from screen_objects import SwipeSpeed, device_config, get_objects
 
 device_config(serial="emulator-5554")
 objects = get_objects(Path("assets/objects"))
 
 if objects["start_button"].tap(timeout=10.0):
-    objects["close_icon"].swipe(Direction.Left, SwipeSpeed.Normal, duration=0.4)
+    objects["close_icon"].swipe(270, SwipeSpeed.Normal, duration=0.4)
 ```
 
 `device_config()` uses `adb` from `PATH` by default. Pass the executable path when necessary:
@@ -119,6 +119,10 @@ used with `exists()`, `tap()`, `swipe()`, and `calibrate()`. Objects calibrated 
 `fixed=True` have one known position, so they do not support `index`, `count()`, or
 `tap_each()`.
 
+Swipe angles are measured clockwise in degrees: `0` is up, `90` is right, `180` is down, and
+`270` is left. Other finite angles, including negative angles, are supported; the swipe endpoint is
+limited to the screen bounds.
+
 ```python
 # Check for a match for up to five seconds.
 if objects["reward_badge"].exists(timeout=5.0):
@@ -168,13 +172,13 @@ force_tap(
 ) -> None
 
 swipe(
-    dir: Direction,
+    angle: float,
     speed: SwipeSpeed,
     duration: float,
     index: int | None = None,
 ) -> bool
 force_swipe(
-    dir: Direction,
+    angle: float,
     speed: SwipeSpeed,
     duration: float,
     index: int | None = None,
@@ -209,7 +213,7 @@ close_app() -> None
 reset_screen() -> None
 screenshot() -> None
 tap_center() -> None
-swipe_center(dir: Direction, speed: SwipeSpeed, duration: float) -> None
+swipe_center(angle: float, speed: SwipeSpeed, duration: float) -> None
 back() -> None
 home() -> None
 write(text: str) -> None
@@ -230,11 +234,6 @@ text-entry action when a fresh lookup is needed.
 ### Enums
 
 ```python
-Direction.Left
-Direction.Right
-Direction.Up
-Direction.Down
-
 SwipeSpeed.Slow
 SwipeSpeed.Normal
 SwipeSpeed.Fast

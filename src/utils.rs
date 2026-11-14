@@ -3,6 +3,7 @@ use std::{fs, io};
 
 use fastrand::u16;
 use pixen::{Image, Point};
+use pyo3::Python;
 use pyo3::exceptions::{PyBufferError, PyRuntimeError};
 use pyo3::prelude::{PyErr, PyResult};
 use stb_image::image;
@@ -84,4 +85,8 @@ pub(super) fn force_error(object_name: &str) -> PyErr {
     PyRuntimeError::new_err(format!(
         "Called force method on {object_name} object, but it was not found.\nCheck log {filename}"
     ))
+}
+
+pub(crate) fn check_python_signals() -> PyResult<()> {
+    Python::attach(|py| py.check_signals())
 }
