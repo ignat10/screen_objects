@@ -209,6 +209,7 @@ device_config(
 ) -> None
 start_app(args: list[str] | None = None) -> None
 close_app() -> None
+run_adb(args: list[str]) -> tuple[int | None, str, str]
 
 reset_screen() -> None
 screenshot() -> None
@@ -225,6 +226,17 @@ device. It then waits with `adb wait-for-device` and until `sys.boot_completed` 
 to select an Android package by name; `start_app()` launches it, and `close_app()` force-stops it.
 Optionally pass `start_app()` a list of extra arguments for Android's `am start` command, such as
 `start_app(args=["-W"])` to wait for the launch to complete.
+
+`run_adb()` runs an additional ADB command against the configured device. Pass the command and its
+arguments as separate list items; the configured serial is added automatically, so do not include
+`-s` yourself. It returns `(return_code, stdout, stderr)` as strings decoded as UTF-8. Invalid
+UTF-8 output raises `ValueError`, and `return_code` is `None` if the process was terminated by a
+signal. A failure to start ADB raises `OSError`; a non-zero ADB exit status is returned rather than
+raised. The screenshot cache is cleared after the command runs.
+
+```python
+return_code, stdout, stderr = run_adb(["shell", "getprop", "ro.build.version.release"])
+```
 
 `screenshot()` saves the cached or newly captured screen to `screen-<device-serial>.png`.
 `tap_center()`, `swipe_center()`, `back()`, and `home()` send their respective device action.

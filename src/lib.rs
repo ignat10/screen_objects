@@ -80,6 +80,9 @@ mod screen_objects {
     #[pymodule_export]
     use adb::close_app;
 
+    #[pymodule_export]
+    use adb::run_adb;
+
     #[pyfunction]
     fn back() -> PyResult<()> {
         adb::back()?;
