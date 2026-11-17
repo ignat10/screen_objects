@@ -164,43 +164,32 @@ pub(super) fn close_app() -> PyResult<()> {
 }
 
 #[pyfunction]
-pub(super) fn run_adb(args: Vec<String>) -> PyResult<(Option<i32>, String, String)> {
-    if args.is_empty() {
-        return Err(PyValueError::new_err("ADB command must not be empty."));
-    }
-    if has_device_selector(&args) {
-        return Err(PyValueError::new_err(
-            "Do not pass an ADB device selector; device_config() already selects the device.",
-        ));
-    }
-
+#[pyo3(signature = (args, check = false))]
+pub(super) fn run_adb(
+    args: Vec<String>,
+    check: bool,
+) -> PyResult<(Option<i32>, String, String)> {
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let output = device_action(&args)?;
     crate::screen::reset();
     let stdout = decode_output(output.stdout, "stdout")?;
     let stderr = decode_output(output.stderr, "stderr")?;
-    Ok((output.status.code(), stdout, stderr))
+    let return_code = output.status.code();
+    if check && return_code != Some(0) {
+        match return_code {
+            Some(code) => Err(PyRuntimeError::new_err(format!(
+                "ADB command failed with exit code {code}.\n{stdout}\n{stderr}",
+            ))),
+            None => Err(PyRuntimeError::new_err("ADB command was terminated by a signal.")),
+        }
+    } else {
+        Ok((Some(0), stdout, stderr))
+    }
 }
 
 fn decode_output(output: Vec<u8>, stream: &str) -> PyResult<String> {
     String::from_utf8(output)
         .map_err(|error| PyValueError::new_err(format!("ADB {stream} is not valid UTF-8: {error}")))
-}
-
-fn has_device_selector(args: &[String]) -> bool {
-    let mut index = 0;
-    while let Some(arg) = args.get(index) {
-        match arg.as_str() {
-            "-s" | "-d" | "-e" | "-t" | "--one-device" | "--serial" => return true,
-            option if option.starts_with("--one-device=") || option.starts_with("--serial=") => {
-                return true;
-            }
-            "-H" | "-P" | "-L" => index += 2,
-            option if option.starts_with('-') => index += 1,
-            _ => break,
-        }
-    }
-    false
 }
 
 pub(super) fn tap(point: Point) -> PyResult<()> {
@@ -294,7 +283,7 @@ fn run(args: &[&str]) -> PyResult<Output> {
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_output, has_device_selector, parse_size};
+    use super::{decode_output, parse_size};
 
     #[test]
     fn parses_the_last_reported_screen_size() {
@@ -309,28 +298,6 @@ mod tests {
         assert!(parse_size("Physical size: unknown").is_err());
         assert!(parse_size("Physical size: 1080xnot-a-number").is_err());
         assert!(parse_size("").is_err());
-    }
-
-    #[test]
-    fn custom_adb_commands_cannot_override_the_configured_device() {
-        assert!(has_device_selector(&[
-            "-s".into(),
-            "other-device".into(),
-            "shell".into()
-        ]));
-        assert!(has_device_selector(&[
-            "-H".into(),
-            "localhost".into(),
-            "-d".into(),
-            "shell".into()
-        ]));
-        assert!(has_device_selector(&["--serial=other-device".into(), "shell".into()]));
-        assert!(!has_device_selector(&[
-            "shell".into(),
-            "input".into(),
-            "keyevent".into(),
-            "-s".into()
-        ]));
     }
 
     #[test]
